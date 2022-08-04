@@ -1,0 +1,18 @@
+* Ping example
+
+In order to run the Ping component with logging, set ~RUST_LOG~, e.g.:
+
+#+begin_src bash
+  RUST_LOG=trace cargo run
+#+end_src
+
+* Ping state machine
+
+#+begin_src plantuml :file ping.svg
+  [*] -> SendingPing
+  SendingPing -> ListeningForPong
+  ListeningForPong -> [*]: Pong
+#+end_src
+
+#+RESULTS:
+[[file:ping.svg]]
