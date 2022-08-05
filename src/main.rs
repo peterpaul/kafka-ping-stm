@@ -1,15 +1,18 @@
+use kafka::consumer::{Consumer, FetchOffset};
+use kafka::producer::{Producer, Record, RequiredAcks};
 use log::debug;
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
 };
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
 use tokio::{select, time};
 
 #[derive(Debug)]
 enum IncomingMessage {
-    Ping,
+    Ping(Ping),
     SendPong,
 }
 
@@ -19,6 +22,11 @@ impl StateTypes for Types {
     type In = IncomingMessage;
     type Out = ();
     type Err = String;
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Ping {
+    id: u32,
 }
 
 #[derive(Debug)]
@@ -33,9 +41,9 @@ impl ListeningForPing {
         }
     }
 
-    fn receive_ping(&mut self) {
+    fn receive_ping(&mut self, ping: Ping) {
         self.ping_received = true;
-        debug!("Received Ping");
+        debug!("Received Ping: {}", ping.id);
     }
 }
 
@@ -49,8 +57,8 @@ impl State<Types> for ListeningForPing {
         message: IncomingMessage,
     ) -> DeliveryStatus<IncomingMessage, <Types as StateTypes>::Err> {
         match message {
-            IncomingMessage::Ping => {
-                self.receive_ping();
+            IncomingMessage::Ping(ping) => {
+                self.receive_ping(ping);
                 DeliveryStatus::Delivered
             }
             _ => DeliveryStatus::Unexpected(message),
@@ -67,18 +75,44 @@ impl State<Types> for ListeningForPing {
     }
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
+struct Pong {
+    id: u32,
+}
+
+impl Pong {
+    fn new() -> Self {
+        Self { id: 44 }
+    }
+}
+
 struct SendingPong {
     pong_sent: bool,
+    producer: Producer,
 }
 
 impl SendingPong {
     fn new() -> Self {
-        Self { pong_sent: false }
+        let producer = Producer::from_hosts(vec!["localhost:9092".to_owned()])
+            .with_ack_timeout(Duration::from_secs(1))
+            .with_required_acks(RequiredAcks::One)
+            .create()
+            .unwrap();
+
+        Self {
+            pong_sent: false,
+            producer,
+        }
     }
 
     fn send_pong(&mut self) {
         debug!("Send Pong");
+        let pong = Pong::new();
+        let pong_message = serde_json::to_string_pretty(&pong).expect("json serialization failed");
+        let pong_record = Record::from_value("pong", pong_message);
+        self.producer
+            .send(&pong_record)
+            .expect("failed to send message");
         self.pong_sent = true;
     }
 }
@@ -115,7 +149,14 @@ impl State<Types> for SendingPong {
 async fn main() {
     pretty_env_logger::init();
 
-    let mut feed = VecDeque::from([IncomingMessage::Ping, IncomingMessage::SendPong]);
+    let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
+        .with_topic("ping".to_owned())
+        .with_fallback_offset(FetchOffset::Earliest)
+        .with_group("my_consumer_group".to_owned())
+        .create()
+        .expect("invalid consumer config");
+
+    let mut feed = VecDeque::from([]);
     let state: Box<dyn State<Types> + Send> = Box::new(ListeningForPing::new());
 
     let mut feeding_interval = time::interval(Duration::from_millis(100));
@@ -127,6 +168,15 @@ async fn main() {
     let (_outgoing, mut result) = state_machine_runner.run();
 
     let res: TimeBoundStateMachineResult<Types> = loop {
+        for msg_result in consumer.poll().unwrap().iter() {
+            for msg in msg_result.messages() {
+                // let _key: &str = std::str::from_utf8(msg.key).unwrap();
+                let ping: Ping =
+                    serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
+                feed.push_front(IncomingMessage::SendPong);
+                feed.push_front(IncomingMessage::Ping(ping));
+            }
+        }
         select! {
             res = &mut result => {
                 break res.expect("Result from State Machine must be communicated");
