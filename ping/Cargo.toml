@@ -1,0 +1,15 @@
+[package]
+name = "kafka-ping-stm"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+oblivious_state_machine = { git = "https://github.com/vnermolaev/oblivious-state-machine.git" }
+kafka = "0.9.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = "1.20.1"
+log = "0.4"
+pretty_env_logger = "0.3"
