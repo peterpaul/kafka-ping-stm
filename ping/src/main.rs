@@ -7,13 +7,14 @@ use oblivious_state_machine::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::env;
 use std::time::Duration;
 use tokio::{select, time};
 
 #[derive(Debug)]
 enum IncomingMessage {
-    SendPing,
-    Pong(Pong),
+    SendPing(Ping),
+    ReceivePong(Pong),
 }
 
 #[derive(Debug)]
@@ -24,19 +25,19 @@ impl StateTypes for Types {
     type Err = String;
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct Ping {
     id: u32,
 }
 
 impl Ping {
-    fn new() -> Self {
-        Self { id: 42 }
+    fn new(id: u32) -> Self {
+        Self { id }
     }
 }
 
 struct SendingPing {
-    ping_sent: bool,
+    sent_ping: Option<Ping>,
     producer: Producer,
 }
 
@@ -49,20 +50,19 @@ impl SendingPing {
             .unwrap();
 
         Self {
-            ping_sent: false,
-	    producer,
+            sent_ping: None,
+            producer,
         }
     }
 
-    fn send_ping(&mut self) {
-        debug!("Send Ping");
-        let ping = Ping::new();
+    fn send_ping(&mut self, ping: Ping) {
+        debug!("Send Ping: {}", ping.id);
         let ping_message = serde_json::to_string_pretty(&ping).expect("json serialization failed");
         let ping_record = Record::from_value("ping", ping_message);
         self.producer
             .send(&ping_record)
             .expect("failed to send message");
-        self.ping_sent = true;
+        self.sent_ping = Some(ping);
     }
 }
 
@@ -76,8 +76,8 @@ impl State<Types> for SendingPing {
         message: IncomingMessage,
     ) -> DeliveryStatus<IncomingMessage, <Types as StateTypes>::Err> {
         match message {
-            IncomingMessage::SendPing => {
-                self.send_ping();
+            IncomingMessage::SendPing(ping) => {
+                self.send_ping(ping);
                 DeliveryStatus::Delivered
             }
             _ => DeliveryStatus::Unexpected(message),
@@ -85,35 +85,36 @@ impl State<Types> for SendingPing {
     }
 
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
-        let next = if self.ping_sent {
-            Transition::Next(Box::new(ListeningForPong::new()))
-        } else {
-            Transition::Same
+        let next = match &self.sent_ping {
+            Some(ping) => Transition::Next(Box::new(ListeningForPong::new(ping.clone()))),
+            None => Transition::Same,
         };
         Ok(next)
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct Pong {
     id: u32,
 }
 
 #[derive(Debug)]
 struct ListeningForPong {
-    pong_received: bool,
+    sent_ping: Ping,
+    received_pong: Option<Pong>,
 }
 
 impl ListeningForPong {
-    fn new() -> Self {
+    fn new(sent_ping: Ping) -> Self {
         Self {
-            pong_received: false,
+            sent_ping,
+            received_pong: None,
         }
     }
 
     fn receive_pong(&mut self, pong: Pong) {
         debug!("Received Pong: {}", pong.id);
-        self.pong_received = true;
+        self.received_pong = Some(pong);
     }
 }
 
@@ -127,19 +128,22 @@ impl State<Types> for ListeningForPong {
         message: IncomingMessage,
     ) -> DeliveryStatus<IncomingMessage, <Types as StateTypes>::Err> {
         match message {
-            IncomingMessage::Pong(pong) => {
-                self.receive_pong(pong);
-                DeliveryStatus::Delivered
+            IncomingMessage::ReceivePong(ref pong) => {
+                if pong.id == self.sent_ping.id {
+                    self.receive_pong(pong.clone());
+                    DeliveryStatus::Delivered
+                } else {
+                    DeliveryStatus::Unexpected(message)
+                }
             }
             _ => DeliveryStatus::Unexpected(message),
         }
     }
 
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
-        let next = if self.pong_received {
-            Transition::Terminal
-        } else {
-            Transition::Same
+        let next = match &self.received_pong {
+            Some(_pong) => Transition::Terminal,
+            None => Transition::Same,
         };
         Ok(next)
     }
@@ -156,7 +160,9 @@ async fn main() {
         .create()
         .expect("invalid consumer config");
 
-    let mut feed = VecDeque::from([IncomingMessage::SendPing]);
+    let args: Vec<String> = env::args().collect();
+    let id = args[1].parse::<u32>().unwrap_or(42);
+    let mut feed = VecDeque::from([IncomingMessage::SendPing(Ping::new(id))]);
     let state: Box<dyn State<Types> + Send> = Box::new(SendingPing::new());
 
     let mut feeding_interval = time::interval(Duration::from_millis(100));
@@ -173,7 +179,7 @@ async fn main() {
                 // let _key: &str = std::str::from_utf8(msg.key).unwrap();
                 let pong: Pong =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Pong");
-                feed.push_front(IncomingMessage::Pong(pong));
+                feed.push_back(IncomingMessage::ReceivePong(pong));
             }
         }
         select! {
