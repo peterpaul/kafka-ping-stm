@@ -12,8 +12,8 @@ use tokio::{select, time};
 
 #[derive(Debug)]
 enum IncomingMessage {
-    Ping(Ping),
-    SendPong,
+    ReceivePing(Ping),
+    SendPong(Pong),
 }
 
 #[derive(Debug)]
@@ -24,26 +24,26 @@ impl StateTypes for Types {
     type Err = String;
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Ping {
     id: u32,
 }
 
 #[derive(Debug)]
 struct ListeningForPing {
-    ping_received: bool,
+    received_ping: Option<Ping>,
 }
 
 impl ListeningForPing {
     fn new() -> Self {
         Self {
-            ping_received: false,
+            received_ping: None,
         }
     }
 
     fn receive_ping(&mut self, ping: Ping) {
-        self.ping_received = true;
         debug!("Received Ping: {}", ping.id);
+        self.received_ping = Some(ping);
     }
 }
 
@@ -57,7 +57,7 @@ impl State<Types> for ListeningForPing {
         message: IncomingMessage,
     ) -> DeliveryStatus<IncomingMessage, <Types as StateTypes>::Err> {
         match message {
-            IncomingMessage::Ping(ping) => {
+            IncomingMessage::ReceivePing(ping) => {
                 self.receive_ping(ping);
                 DeliveryStatus::Delivered
             }
@@ -66,10 +66,9 @@ impl State<Types> for ListeningForPing {
     }
 
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
-        let next = if self.ping_received {
-            Transition::Next(Box::new(SendingPong::new()))
-        } else {
-            Transition::Same
+        let next = match &self.received_ping {
+            Some(ping) => Transition::Next(Box::new(SendingPong::new(ping.clone()))),
+            None => Transition::Same,
         };
         Ok(next)
     }
@@ -81,18 +80,19 @@ struct Pong {
 }
 
 impl Pong {
-    fn new() -> Self {
-        Self { id: 44 }
+    fn new(id: u32) -> Self {
+        Self { id }
     }
 }
 
 struct SendingPong {
-    pong_sent: bool,
+    received_ping: Ping,
+    sent_pong: Option<Pong>,
     producer: Producer,
 }
 
 impl SendingPong {
-    fn new() -> Self {
+    fn new(received_ping: Ping) -> Self {
         let producer = Producer::from_hosts(vec!["localhost:9092".to_owned()])
             .with_ack_timeout(Duration::from_secs(1))
             .with_required_acks(RequiredAcks::One)
@@ -100,20 +100,20 @@ impl SendingPong {
             .unwrap();
 
         Self {
-            pong_sent: false,
+            received_ping,
+            sent_pong: None,
             producer,
         }
     }
 
-    fn send_pong(&mut self) {
-        debug!("Send Pong");
-        let pong = Pong::new();
+    fn send_pong(&mut self, pong: Pong) {
+        debug!("Send Pong: {}", pong.id);
         let pong_message = serde_json::to_string_pretty(&pong).expect("json serialization failed");
         let pong_record = Record::from_value("pong", pong_message);
         self.producer
             .send(&pong_record)
             .expect("failed to send message");
-        self.pong_sent = true;
+        self.sent_pong = Some(pong);
     }
 }
 
@@ -127,8 +127,8 @@ impl State<Types> for SendingPong {
         message: IncomingMessage,
     ) -> DeliveryStatus<IncomingMessage, <Types as StateTypes>::Err> {
         match message {
-            IncomingMessage::SendPong => {
-                self.send_pong();
+            IncomingMessage::SendPong(pong) => {
+                self.send_pong(pong);
                 DeliveryStatus::Delivered
             }
             _ => DeliveryStatus::Unexpected(message),
@@ -136,10 +136,15 @@ impl State<Types> for SendingPong {
     }
 
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
-        let next = if self.pong_sent {
-            Transition::Terminal
-        } else {
-            Transition::Same
+        let next = match &self.sent_pong {
+            Some(pong) => {
+                if pong.id == 0 {
+                    Transition::Terminal
+                } else {
+                    Transition::Next(Box::new(ListeningForPing::new()))
+                }
+            }
+            None => Transition::Same,
         };
         Ok(next)
     }
@@ -163,7 +168,7 @@ async fn main() {
     feeding_interval.tick().await;
 
     let mut state_machine_runner =
-        TimeBoundStateMachineRunner::new("Ping".to_owned(), state, Duration::from_secs(5));
+        TimeBoundStateMachineRunner::new("Ping".to_owned(), state, Duration::from_secs(30));
 
     let (_outgoing, mut result) = state_machine_runner.run();
 
@@ -173,8 +178,8 @@ async fn main() {
                 // let _key: &str = std::str::from_utf8(msg.key).unwrap();
                 let ping: Ping =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
-                feed.push_front(IncomingMessage::SendPong);
-                feed.push_front(IncomingMessage::Ping(ping));
+                feed.push_back(IncomingMessage::ReceivePing(ping.clone()));
+                feed.push_back(IncomingMessage::SendPong(Pong::new(ping.id)));
             }
         }
         select! {
