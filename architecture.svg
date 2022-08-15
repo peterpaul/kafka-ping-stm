@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" contentStyleType="text/css" height="284px" preserveAspectRatio="none" style="width:939px;height:284px;background:#FFFFFF;" version="1.1" viewBox="0 0 939 284" width="939px" zoomAndPan="magnify"><defs/><g><rect height="26.2969" style="stroke:#00000000;stroke-width:1.0;fill:none;" width="148" x="388.5" y="5"/><text fill="#000000" font-family="sans-serif" font-size="14" font-weight="bold" lengthAdjust="spacing" textLength="138" x="393.5" y="22.9951">Ping Architecture</text><!--MD5=[1f24d0c89451ebf8eafe93114b999da2]
+cluster Apache Kafka--><g id="cluster_Apache Kafka"><path d="M382,46.2969 L496,46.2969 C501,46.2969 501,139.2969 501,139.2969 C501,139.2969 501,232.2969 496,232.2969 L382,232.2969 C377,232.2969 377,139.2969 377,139.2969 C377,139.2969 377,46.2969 382,46.2969 " style="stroke:#181818;stroke-width:1.0;fill:none;"/><path d="M496,46.2969 C491,46.2969 491,139.2969 491,139.2969 C491,232.2969 496,232.2969 496,232.2969 " fill="none" style="stroke:#181818;stroke-width:1.0;"/><image height="48" width="48" x="415" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAACrElEQVR4Xu2Y4Y3CMAyFswIrsAIrsAIrsAIrsAIrsAIrsAIrsELuKZaejOPSF8rdcdK9H1XrWvVXx3HSlvphKtHw2/rjQOfzebPZlKb1en04HKLHYg0A7fd7Q/EC3/1+j64LpAIdj0dCIDfME7TdbqP3AqlADH86ncxyvV5Xq5UZL5fLo/vrkoAQL00G4Mz+xmKSgKYCExTl5e1LJAF9XIYgloteQzDCGcehaagCoQNZbGjVxMvdbhec/ZQ06SlUgSA8NIQprQ8Ft7RdFbnOBoBqGybkwwKgGyETwcEnEgWHd8CRFtwN/r3GgKDb7WZPT+uGDdOzsvb7dPZ6M5DdgoKdNRfsveY9ghQghA/2bwECCgvIhCEIZZE2AlSeGVF2zjeXCsQ66GXdErh+xS2tY1krIqUy+SUgP3dSBZRUSkVXBQh91j8X+cBLAzFtS5hc8PdT3QSL2K/ngXzb5bphwjBxOHCCS95C3YAYzRDHtPynNA/E101z7mtLzMFzzQNhali8tPdzBpWJRjCqdwLhPN4e1zyQX7zivccK+6Eh81USGkloBz5DuIU3QdnhGKbCc80DVdd/SyvtY1Po2iYQA4ujTMHi5+ATSUDcwk4phQvCWyljKgHVxuTz5GU7DQTzWHDGqCErODJhb1s6TAiJJ3KVQEhchoEgtK8nbhDSaRE0AGTi09NSJWuwf8v2w/QciIFDuZjxF4C4zvhy4TKs/AUYA/KbfCSjZ/LzEdWG5u53JsraMgDUf22V7HdM6la0KVZ1oNCUfQvoPxTh7B3SXE5JBWIAft/40UmXVVQbfMQGTUlAjB22RBwdcTgUSUAcrxCYoOnO5DVJQAz8Kb9j/D6fH2J+Q618tIuSgOrjr49Nk7+M3gukAtWJ/yx9H1qoAaD6aT/Of0b/QHP6AvKJy8JwWEczAAAAAElFTkSuQmCC" y="48.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" font-weight="bold" lengthAdjust="spacing" textLength="108" x="385" y="109.292">Apache Kafka</text></g><!--MD5=[c3db695922c263d6b551eabcb1733d4a]
+cluster Ping Client--><g id="cluster_Ping Client"><rect height="226" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:1.0;fill:none;" width="304" x="7" y="52.2969"/><rect height="10" style="stroke:#181818;stroke-width:1.0;fill:none;" width="15" x="291" y="57.2969"/><rect height="2" style="stroke:#181818;stroke-width:1.0;fill:none;" width="4" x="289" y="59.2969"/><rect height="2" style="stroke:#181818;stroke-width:1.0;fill:none;" width="4" x="289" y="63.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" font-weight="bold" lengthAdjust="spacing" textLength="84" x="117" y="78.292">Ping Client</text></g><!--MD5=[7b36dc636e4ae5d5555e64e1daac43d8]
+cluster Ping Server--><g id="cluster_Ping Server"><rect height="226" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:1.0;fill:none;" width="366" x="567" y="44.2969"/><rect height="10" style="stroke:#181818;stroke-width:1.0;fill:none;" width="15" x="913" y="49.2969"/><rect height="2" style="stroke:#181818;stroke-width:1.0;fill:none;" width="4" x="911" y="51.2969"/><rect height="2" style="stroke:#181818;stroke-width:1.0;fill:none;" width="4" x="911" y="55.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" font-weight="bold" lengthAdjust="spacing" textLength="92" x="704" y="70.292">Ping Server</text></g><!--MD5=[5c93a0072bce6ed02aef3e9e89bf67d4]
+entity ping--><g id="elem_ping"><path d="M419,129.2969 L459,129.2969 C464,129.2969 464,142.4453 464,142.4453 C464,142.4453 464,155.5938 459,155.5938 L419,155.5938 C414,155.5938 414,142.4453 414,142.4453 C414,142.4453 414,129.2969 419,129.2969 " fill="#F1F1F1" style="stroke:#181818;stroke-width:0.5;"/><path d="M459,129.2969 C454,129.2969 454,142.4453 454,142.4453 C454,155.5938 459,155.5938 459,155.5938 " fill="none" style="stroke:#181818;stroke-width:0.5;"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="30" x="419" y="147.292">ping</text></g><!--MD5=[a4ad7f9888b971c7bd8e7a0d4bbc75fe]
+entity pong--><g id="elem_pong"><path d="M416,190.2969 L462,190.2969 C467,190.2969 467,203.4453 467,203.4453 C467,203.4453 467,216.5938 462,216.5938 L416,216.5938 C411,216.5938 411,203.4453 411,203.4453 C411,203.4453 411,190.2969 416,190.2969 " fill="#F1F1F1" style="stroke:#181818;stroke-width:0.5;"/><path d="M462,190.2969 C457,190.2969 457,203.4453 457,203.4453 C457,216.5938 462,216.5938 462,216.5938 " fill="none" style="stroke:#181818;stroke-width:0.5;"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="36" x="416" y="208.292">pong</text></g><!--MD5=[04da2a872584cc4ebee98aaca5f036f5]
+entity ping_stm--><g id="elem_ping_stm"><rect fill="#F1F1F1" height="46.2969" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:0.5;" width="66" x="23" y="138.2969"/><rect fill="#F1F1F1" height="10" style="stroke:#181818;stroke-width:0.5;" width="15" x="69" y="143.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="67" y="145.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="67" y="149.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="26" x="38" y="171.292">stm</text></g><!--MD5=[f6298948a9fbeb609ec00ad4a59e2111]
+entity ping_producer--><g id="elem_ping_producer"><rect fill="#F1F1F1" height="46.2969" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:0.5;" width="103" x="164.5" y="111.2969"/><rect fill="#F1F1F1" height="10" style="stroke:#181818;stroke-width:0.5;" width="15" x="247.5" y="116.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="245.5" y="118.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="245.5" y="122.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="63" x="179.5" y="144.292">producer</text></g><!--MD5=[f9cf51c951f915d805a85a18919fe754]
+entity ping_consumer--><g id="elem_ping_consumer"><rect fill="#F1F1F1" height="46.2969" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:0.5;" width="110" x="161" y="192.2969"/><rect fill="#F1F1F1" height="10" style="stroke:#181818;stroke-width:0.5;" width="15" x="251" y="197.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="249" y="199.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="249" y="203.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="70" x="176" y="225.292">consumer</text></g><!--MD5=[7c464d881875016c8ddd9dfb6d502035]
+entity pong_stm--><g id="elem_pong_stm"><rect fill="#F1F1F1" height="46.2969" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:0.5;" width="66" x="851" y="143.2969"/><rect fill="#F1F1F1" height="10" style="stroke:#181818;stroke-width:0.5;" width="15" x="897" y="148.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="895" y="150.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="895" y="154.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="26" x="866" y="176.292">stm</text></g><!--MD5=[d3f538612c99b294430356fa6d69b396]
+entity pong_consumer--><g id="elem_pong_consumer"><rect fill="#F1F1F1" height="46.2969" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:0.5;" width="110" x="607" y="103.2969"/><rect fill="#F1F1F1" height="10" style="stroke:#181818;stroke-width:0.5;" width="15" x="697" y="108.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="695" y="110.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="695" y="114.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="70" x="622" y="136.292">consumer</text></g><!--MD5=[fa45678e134d7a7ccb79a60d3b04470a]
+entity pong_producer--><g id="elem_pong_producer"><rect fill="#F1F1F1" height="46.2969" rx="2.5" ry="2.5" style="stroke:#181818;stroke-width:0.5;" width="103" x="610.5" y="184.2969"/><rect fill="#F1F1F1" height="10" style="stroke:#181818;stroke-width:0.5;" width="15" x="693.5" y="189.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="691.5" y="191.2969"/><rect fill="#F1F1F1" height="2" style="stroke:#181818;stroke-width:0.5;" width="4" x="691.5" y="195.2969"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacing" textLength="63" x="625.5" y="217.292">producer</text></g><!--MD5=[dd33cc5383eeb8848400ea9fbde5cd8f]
+reverse link pong to ping--><!--MD5=[24663a1e29d25fef3f28f16d6f112ca7]
+link ping_stm to ping_producer--><g id="link_ping_stm_ping_producer"><path d="M89.17,163.1469 C98.76,163.6269 109.3,164.0669 119,164.2969 C123.44,164.4069 124.62,165.0369 129,164.2969 C139.05,162.5969 149.49,159.8469 159.49,156.6869 " fill="none" id="ping_stm-to-ping_producer" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="164.36,155.1069,154.565,154.0785,159.6039,156.6494,157.033,161.6883,164.36,155.1069" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="8" x="120" y="160.3638">1</text></g><!--MD5=[d35d3bfc68be7df66cb5016fa47b6b43]
+link ping_producer to ping_stm--><g id="link_ping_producer_ping_stm"><path d="M164.43,137.2369 C149.7,138.5769 133.64,140.5169 119,143.2969 C110.88,144.8369 102.3,146.9869 94.2,149.2669 " fill="none" id="ping_producer-to-ping_stm" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="89.22,150.6869,98.9753,152.0414,94.0249,149.3039,96.7624,144.3535,89.22,150.6869" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="8" x="120" y="138.3638">2</text></g><!--MD5=[84a180a832d4ff0151d9041b2673c9dd]
+link ping_stm to ping_consumer--><g id="link_ping_stm_ping_consumer"><path d="M89.03,177.6369 C98.53,182.1069 109.05,186.7069 119,190.2969 C130.8,194.5569 143.66,198.4069 156.01,201.7469 " fill="none" id="ping_stm-to-ping_consumer" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="160.9,203.0569,153.2323,196.8758,156.0684,201.7703,151.1738,204.6064,160.9,203.0569" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="8" x="120" y="186.3638">3</text></g><!--MD5=[728c958145589bb26906e4d07c94d205]
+link pong_consumer to pong_stm--><g id="link_pong_consumer_pong_stm"><path d="M717.1,136.1369 C757.12,143.4069 810.58,153.1269 845.86,159.5469 " fill="none" id="pong_consumer-to-pong_stm" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="850.93,160.4669,842.7794,154.9381,846.0088,159.5825,841.3644,162.8119,850.93,160.4669" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="8" x="781" y="144.3638">1</text></g><!--MD5=[80a5c83f7da9e44cd89ec64ce0bc0fec]
+link pong_stm to pong_producer--><g id="link_pong_stm_pong_producer"><path d="M850.9,172.2769 C816.3,178.7269 760.57,189.1169 718.77,196.9069 " fill="none" id="pong_stm-to-pong_producer" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="713.75,197.8369,723.3298,200.1232,718.6657,196.9223,721.8665,192.2582,713.75,197.8369" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="8" x="781" y="180.3638">2</text></g><!--MD5=[cf19d9f219a8074e9946a3dbef0c46b1]
+link ping_producer to ping--><g id="link_ping_producer_ping"><path d="M267.7,136.1369 C311.31,137.7069 372.69,139.9369 408.61,141.2369 " fill="none" id="ping_producer-to-ping" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="413.72,141.4169,404.8747,137.0856,408.7234,141.2313,404.5777,145.0801,413.72,141.4169" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="27" x="330.5" y="134.3638">Ping</text></g><!--MD5=[ea592264c1c3b62e5d0e226713dddab1]
+link ping to pong_consumer--><g id="link_ping_pong_consumer"><path d="M464.07,140.5569 C496.82,138.1869 556.49,133.8669 601.6,130.5969 " fill="none" id="ping-to-pong_consumer" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="606.74,130.2269,597.4772,126.8801,601.7528,130.5841,598.0488,134.8597,606.74,130.2269" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="27" x="520.5" y="130.3638">Ping</text></g><!--MD5=[30088fc8828004020384799bf60dfa0b]
+reverse link pong to pong_producer--><g id="link_pong_pong_producer"><path d="M472.27,203.8769 C508.46,204.5369 567.64,205.6069 610.09,206.3769 " fill="none" id="pong-backto-pong_producer" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="467.1,203.7869,476.0301,207.9406,472.0993,203.8726,476.1672,199.9417,467.1,203.7869" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="32" x="518" y="201.3638">Pong</text></g><!--MD5=[8bd5fe999c25ba919b39284993327143]
+reverse link ping_consumer to pong--><g id="link_ping_consumer_pong"><path d="M276.07,212.0869 C319.89,209.7069 377.61,206.5769 410.98,204.7669 " fill="none" id="ping_consumer-backto-pong" style="stroke:#181818;stroke-width:1.0;"/><polygon fill="#181818" points="271.06,212.3569,280.2641,215.8617,276.0526,212.0851,279.8292,207.8735,271.06,212.3569" style="stroke:#181818;stroke-width:1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacing" textLength="32" x="328" y="204.3638">Pong</text></g><!--MD5=[cfc291e2530c27e9024488f6881777b9]
+@startuml
+left to right direction
+title Ping Architecture
+
+!include <cloudinsight/kafka>
+queue "Apache Kafka" <<$kafka>> {
+    queue ping
+    queue pong
+    ping -[hidden]l-> pong
+}
+
+component "Ping Client" {
+    together {
+	component "producer" as ping_producer
+	component "consumer" as ping_consumer
+    }
+    component "stm" as ping_stm
+    ping_stm - -> ping_producer: 1
+    ping_producer - -> ping_stm: 2
+    ping_stm - -> ping_consumer: 3
+}
+component "Ping Server" {
+    together {
+	component "consumer" as pong_consumer
+	component "producer" as pong_producer
+    }
+    component "stm" as pong_stm
+    pong_consumer - - -> pong_stm: 1
+    pong_stm - -> pong_producer: 2
+}
+
+ping_producer - -> ping: Ping
+ping - -> pong_consumer: Ping
+pong <- - pong_producer: Pong
+ping_consumer <- - pong: Pong
+@enduml
+
+@startuml
+left to right direction
+title Ping Architecture
+
+sprite $kafka [48x48/16] {
+000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000
+0000000000000005CFFD8000000000000000000000000000
+000000000000009FFFFFFC10000000000000000000000000
+00000000000007FFFDCFFFB0000000000000000000000000
+0000000000000FFF6003EFF4000000000000000000000000
+0000000000004FFB00006FF8000000000000000000000000
+0000000000006FF800004FF9000000000000000000000000
+0000000000004FFB00006FF8000000000000000000000000
+0000000000000EFF6003EFF4000000464100000000000000
+00000000000005FFFEEFFFA000007FFFFF80000000000000
+000000000000008FFFFFFC000009FFFFFFF9000000000000
+0000000000000003AFFD7000005FFFB8BFFF500000000000
+00000000000000002FF4000000CFF70006FFC00000000000
+00000000000000002FF4000000FFF00000EFF00000000000
+00000000000000002FF4000000FFE00000EFF00000000000
+000000000000002AFFFFC50000EFF40003FFD00000000000
+00000000000006FFFFFFFFB02CFFFF646EFF800000000000
+0000000000005FFFFFFFFFFCFFFFFFFFFFFC000000000000
+000000000001FFFFB658FFFFFF71BFFFFFB1000000000000
+000000000007FFF600002EFFE20003898400000000000000
+00000000000BFFC0000006FFF10000000000000000000000
+00000000000DFF90000003FFF40000000000000000000000
+00000000000DFF90000003FFF30000000000000000000000
+00000000000AFFD0000007FFF10000000000000000000000
+000000000006FFF800005FFFF30005ACA600000000000000
+000000000000EFFFC77AFFFFFF83DFFFFFD2000000000000
+0000000000004FFFFFFFFFFAFFFFFFFFFFFE100000000000
+00000000000004EFFFFFFF701AFFFE525DFF800000000000
+0000000000000018CFFE820000EFF30002FFD00000000000
+00000000000000002FF6000000FFE00000EFF00000000000
+00000000000000002FF6000000EFF10000FFF00000000000
+00000000000000002FF6000000BFF80008FFB00000000000
+0000000000000003AFFE6000004FFFC9CFFF400000000000
+000000000000007FFFFFFC100007FFFFFFF8000000000000
+00000000000005FFFFEFFFA000005EFFFE60000000000000
+0000000000000EFF7004FFF3000000242000000000000000
+0000000000004FFC00007FF8000000000000000000000000
+0000000000005FF800004FF9000000000000000000000000
+0000000000004FFB00006FF8000000000000000000000000
+0000000000001FFF5002EFF5000000000000000000000000
+00000000000008FFFCCFFFC0000000000000000000000000
+000000000000009FFFFFFC10000000000000000000000000
+0000000000000005CFFD8000000000000000000000000000
+000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000
+}
+queue "Apache Kafka" <<$kafka>> {
+    queue ping
+    queue pong
+    ping -[hidden]l-> pong
+}
+
+component "Ping Client" {
+    together {
+	component "producer" as ping_producer
+	component "consumer" as ping_consumer
+    }
+    component "stm" as ping_stm
+    ping_stm - -> ping_producer: 1
+    ping_producer - -> ping_stm: 2
+    ping_stm - -> ping_consumer: 3
+}
+component "Ping Server" {
+    together {
+	component "consumer" as pong_consumer
+	component "producer" as pong_producer
+    }
+    component "stm" as pong_stm
+    pong_consumer - - -> pong_stm: 1
+    pong_stm - -> pong_producer: 2
+}
+
+ping_producer - -> ping: Ping
+ping - -> pong_consumer: Ping
+pong <- - pong_producer: Pong
+ping_consumer <- - pong: Pong
+@enduml
+
+PlantUML version 1.2022.2(Sat Mar 05 17:30:19 CET 2022)
+(GPL source distribution)
+Java Runtime: OpenJDK Runtime Environment
+JVM: OpenJDK 64-Bit Server VM
+Default Encoding: UTF-8
+Language: en
+Country: US
+--></g></svg>

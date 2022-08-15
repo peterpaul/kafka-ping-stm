@@ -2,15 +2,47 @@
 
 This application is a POC, implementing the following behaviour using Apache Kafka as broker:
 
-#+begin_src plantuml :file seq.svg
-  ping -> broker: Ping
-  pong <- broker: Ping
-  pong -> broker: Pong
-  ping <- broker: Pong
+#+begin_src plantuml :file architecture.svg
+  @startuml
+  left to right direction
+  title Ping Architecture
+
+  !include <cloudinsight/kafka>
+  queue "Apache Kafka" <<$kafka>> {
+      queue ping
+      queue pong
+      ping -[hidden]l-> pong
+  }
+
+  component "Ping Client" {
+      together {
+	  component "producer" as ping_producer
+	  component "consumer" as ping_consumer
+      }
+      component "stm" as ping_stm
+      ping_stm --> ping_producer: 1
+      ping_producer --> ping_stm: 2
+      ping_stm --> ping_consumer: 3
+  }
+  component "Ping Server" {
+      together {
+	  component "consumer" as pong_consumer
+	  component "producer" as pong_producer
+      }
+      component "stm" as pong_stm
+      pong_consumer ---> pong_stm: 1
+      pong_stm --> pong_producer: 2
+  }
+
+  ping_producer --> ping: Ping
+  ping --> pong_consumer: Ping
+  pong <-- pong_producer: Pong
+  ping_consumer <-- pong: Pong
+  @enduml
 #+end_src
 
 #+RESULTS:
-[[file:seq.svg]]
+[[file:architecture.svg]]
 
 Both the client and the server component are implemented in Rust using the [[https://github.com/vnermolaev/oblivious-state-machine][Oblivious state machine]] and [[https://github.com/kafka-rust/kafka-rust][kafka-rust]] libraries.
 
@@ -28,7 +60,7 @@ In order to run the Ping component with logging, set ~RUST_LOG~, e.g.:
   RUST_LOG=trace cargo run --bin kafka-ping-stm
 #+end_src
 
-* Ping state machine
+** Ping state machine
 
 #+begin_src plantuml :file ping.svg
   [*] -> SendingPing: id
@@ -48,14 +80,33 @@ In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
   RUST_LOG=trace cargo run --bin kafka-pong-stm
 #+end_src
 
-* Pong state machine
+** Pong state machine
 
 #+begin_src plantuml :file pong.svg
   [*] -> ListeningForPing
   ListeningForPing -> SendingPong: Ping(id)
-  SendingPong -> ListeningForPing: id != 0
-  SendingPong -> [*]: id == 0
+  SendingPong -> [*]
 #+end_src
 
 #+RESULTS:
 [[file:pong.svg]]
+
+** Making this a server
+
+The Pong component is implemented as a server, for every incoming
+message on the ~ping~ queue, it parses the message and spanws a new
+tokio task that executes the oblivious state machine.
+
+#+begin_src plantuml :file pong-server.svg
+  [kafka consumer] -> [pong stm]: spawn tokio task
+#+end_src
+
+#+RESULTS:
+[[file:pong-server.svg]]
+
+The disadvantage of this approach it that this will only work for STMs
+that depend on a single kafka message. In order to make this work for
+a STM that depends on multiple kafka messages to advance the STM, we
+should have a correlation id in the messages, and open a channel for
+each stm. Then newer messages can be sent to the correct channel based
+on the correlation id.

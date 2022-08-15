@@ -137,32 +137,19 @@ impl State<Types> for SendingPong {
 
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.sent_pong {
-            Some(pong) => {
-                if pong.id == 0 {
-                    Transition::Terminal
-                } else {
-                    Transition::Next(Box::new(ListeningForPing::new()))
-                }
-            }
+            Some(_pong) => Transition::Terminal,
             None => Transition::Same,
         };
         Ok(next)
     }
 }
 
-#[tokio::main]
-async fn main() {
-    pretty_env_logger::init();
-
-    let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
-        .with_topic("ping".to_owned())
-        .with_fallback_offset(FetchOffset::Earliest)
-        .with_group("my_consumer_group".to_owned())
-        .create()
-        .expect("invalid consumer config");
+async fn create_and_run_stm(ping: Ping) {
+    let state: Box<dyn State<Types> + Send> = Box::new(ListeningForPing::new());
 
     let mut feed = VecDeque::from([]);
-    let state: Box<dyn State<Types> + Send> = Box::new(ListeningForPing::new());
+    feed.push_back(IncomingMessage::ReceivePing(ping.clone()));
+    feed.push_back(IncomingMessage::SendPong(Pong::new(ping.id)));
 
     let mut feeding_interval = time::interval(Duration::from_millis(100));
     feeding_interval.tick().await;
@@ -173,15 +160,6 @@ async fn main() {
     let (_outgoing, mut result) = state_machine_runner.run();
 
     let res: TimeBoundStateMachineResult<Types> = loop {
-        for msg_result in consumer.poll().unwrap().iter() {
-            for msg in msg_result.messages() {
-                // let _key: &str = std::str::from_utf8(msg.key).unwrap();
-                let ping: Ping =
-                    serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
-                feed.push_back(IncomingMessage::ReceivePing(ping.clone()));
-                feed.push_back(IncomingMessage::SendPong(Pong::new(ping.id)));
-            }
-        }
         select! {
             res = &mut result => {
                 break res.expect("Result from State Machine must be communicated");
@@ -196,4 +174,30 @@ async fn main() {
     };
 
     let _result = res.unwrap_or_else(|_| panic!("State machine did not complete in time"));
+}
+
+#[tokio::main]
+async fn main() {
+    pretty_env_logger::init();
+
+    let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
+        .with_topic("ping".to_owned())
+        .with_fallback_offset(FetchOffset::Earliest)
+        .with_group("my_consumer_group".to_owned())
+        .create()
+        .expect("invalid consumer config");
+
+    loop {
+        for msg_result in consumer.poll().unwrap().iter() {
+            for msg in msg_result.messages() {
+                // parse json message, ideally this is done inside the tokio task
+                let ping: Ping =
+                    serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
+                // spawn a separate tokio task which runs the oblivious STM
+                tokio::spawn(async move { create_and_run_stm(ping).await });
+            }
+            consumer.consume_messageset(msg_result).unwrap();
+        }
+        consumer.commit_consumed().unwrap();
+    }
 }
