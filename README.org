@@ -48,11 +48,19 @@ Both the client and the server component are implemented in Rust using the [[htt
 
 * Setup development environment
 
+The development environment is setup using ~docker-compose~, and consists of a Kafka server, including zookeeper, kafka-ui, schemaregistry and kafka-connect.
+
 #+begin_src bash
   docker-compose up
 #+end_src
 
-* Ping example
+This will download and start all the necessary services. It will also create the topics that needed for this POC.
+
+You can Contact Kafka UI at: http://localhost:8080/
+
+* Ping Client
+
+The Ping client is implemented as a single-shot CLI application.
 
 In order to run the Ping component with logging, set ~RUST_LOG~, e.g.:
 
@@ -60,31 +68,41 @@ In order to run the Ping component with logging, set ~RUST_LOG~, e.g.:
   RUST_LOG=trace cargo run --bin kafka-ping-stm
 #+end_src
 
+Or spawn many concurrent tasks:
+
+#+begin_src bash
+  for i in {0..31};
+  do
+      RUST_LOG=info target/release/kafka-ping-stm &
+  done
+#+end_src
+
 ** Ping state machine
 
 #+begin_src plantuml :file ping.svg
-  [*] -> SendingPing: id
+  [*] -> SendingPing: correlation_id
   SendingPing -> ListeningForPong
-  ListeningForPong -> [*]: Pong(id)
+  ListeningForPong -> [*]: Pong(correlation_id)
 #+end_src
 
 #+RESULTS:
 [[file:ping.svg]]
 
+* Ping Server
 
-* Pong example
+The Ping server is implemented using ~tokio~. For each incoming message, a new task is spawned, that will execute the STM.
 
 In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
 
 #+begin_src bash
-  RUST_LOG=trace cargo run --bin kafka-pong-stm
+  RUST_LOG=info cargo run --bin kafka-pong-stm
 #+end_src
 
 ** Pong state machine
 
 #+begin_src plantuml :file pong.svg
   [*] -> ListeningForPing
-  ListeningForPing -> SendingPong: Ping(id)
+  ListeningForPing -> SendingPong: Ping
   SendingPong -> [*]
 #+end_src
 
@@ -110,3 +128,8 @@ a STM that depends on multiple kafka messages to advance the STM, we
 should have a correlation id in the messages, and open a channel for
 each stm. Then newer messages can be sent to the correct channel based
 on the correlation id.
+
+* TODO
+
+- Use ~apache-avro = { version = "X.Y.Z", features = ["derive"] }~ instead of JSON, and publish schema to schemaregistry.
+- Create topics from client/server?

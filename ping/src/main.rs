@@ -1,13 +1,13 @@
+use kafka_ping_stm::{Ping, Pong};
+
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
-use log::debug;
+use log::info;
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
 };
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::env;
 use std::time::Duration;
 use tokio::{select, time};
 
@@ -23,17 +23,6 @@ impl StateTypes for Types {
     type In = IncomingMessage;
     type Out = ();
     type Err = String;
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Ping {
-    id: u32,
-}
-
-impl Ping {
-    fn new(id: u32) -> Self {
-        Self { id }
-    }
 }
 
 struct SendingPing {
@@ -56,7 +45,7 @@ impl SendingPing {
     }
 
     fn send_ping(&mut self, ping: Ping) {
-        debug!("Send Ping: {}", ping.id);
+        info!("Send Ping: {:?}", ping);
         let ping_message = serde_json::to_string_pretty(&ping).expect("json serialization failed");
         let ping_record = Record::from_value("ping", ping_message);
         self.producer
@@ -93,11 +82,6 @@ impl State<Types> for SendingPing {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Pong {
-    id: u32,
-}
-
 #[derive(Debug)]
 struct ListeningForPong {
     sent_ping: Ping,
@@ -113,7 +97,7 @@ impl ListeningForPong {
     }
 
     fn receive_pong(&mut self, pong: Pong) {
-        debug!("Received Pong: {}", pong.id);
+        info!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
     }
 }
@@ -129,7 +113,7 @@ impl State<Types> for ListeningForPong {
     ) -> DeliveryStatus<IncomingMessage, <Types as StateTypes>::Err> {
         match message {
             IncomingMessage::ReceivePong(ref pong) => {
-                if pong.id == self.sent_ping.id {
+                if pong.correlation_id == self.sent_ping.correlation_id {
                     self.receive_pong(pong.clone());
                     DeliveryStatus::Delivered
                 } else {
@@ -160,9 +144,7 @@ async fn main() {
         .create()
         .expect("invalid consumer config");
 
-    let args: Vec<String> = env::args().collect();
-    let id = args[1].parse::<u32>().unwrap_or(42);
-    let mut feed = VecDeque::from([IncomingMessage::SendPing(Ping::new(id))]);
+    let mut feed = VecDeque::from([IncomingMessage::SendPing(Ping::new())]);
     let state: Box<dyn State<Types> + Send> = Box::new(SendingPing::new());
 
     let mut feeding_interval = time::interval(Duration::from_millis(100));

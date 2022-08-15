@@ -89,15 +89,11 @@ services:
       CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect0
       CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
 
-  # kafka-init-topics:
-  #   image: confluentinc/cp-kafka:5.3.1
-  #   volumes:
-  #      - ./message.json:/data/message.json
-  #   depends_on:
-  #     - kafka1
-  #   command: "bash -c 'echo Waiting for Kafka to be ready... && \
-  #              cub kafka-ready -b kafka1:29092 1 30 && \
-  #              kafka-topics --create --topic second.users --partitions 3 --replication-factor 1 --if-not-exists --zookeeper zookeeper1:2181 && \
-  #              kafka-topics --create --topic second.messages --partitions 2 --replication-factor 1 --if-not-exists --zookeeper zookeeper1:2181 && \
-  #              kafka-topics --create --topic first.messages --partitions 2 --replication-factor 1 --if-not-exists --zookeeper zookeeper0:2181 && \
-  #              kafka-console-producer --broker-list kafka1:29092 -topic second.users < /data/message.json'"
+  kafka-init-topics:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - kafka0
+    command: "bash -c 'echo Waiting for Kafka to be ready... && \
+               cub kafka-ready -b kafka0:29092 1 30 && \
+               kafka-topics --create --topic ping --if-not-exists --bootstrap-server kafka0:29092 && \
+               kafka-topics --create --topic pong --if-not-exists --bootstrap-server kafka0:29092'"

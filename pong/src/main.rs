@@ -1,11 +1,12 @@
+use kafka_ping_stm::{Ping, Pong};
+
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
-use log::debug;
+use log::info;
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
 };
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
 use tokio::{select, time};
@@ -24,11 +25,6 @@ impl StateTypes for Types {
     type Err = String;
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Ping {
-    id: u32,
-}
-
 #[derive(Debug)]
 struct ListeningForPing {
     received_ping: Option<Ping>,
@@ -42,7 +38,7 @@ impl ListeningForPing {
     }
 
     fn receive_ping(&mut self, ping: Ping) {
-        debug!("Received Ping: {}", ping.id);
+        info!("Received Ping: {:?}", ping);
         self.received_ping = Some(ping);
     }
 }
@@ -74,17 +70,6 @@ impl State<Types> for ListeningForPing {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Pong {
-    id: u32,
-}
-
-impl Pong {
-    fn new(id: u32) -> Self {
-        Self { id }
-    }
-}
-
 struct SendingPong {
     received_ping: Ping,
     sent_pong: Option<Pong>,
@@ -107,7 +92,7 @@ impl SendingPong {
     }
 
     fn send_pong(&mut self, pong: Pong) {
-        debug!("Send Pong: {}", pong.id);
+        info!("Send Pong: {:?}", pong);
         let pong_message = serde_json::to_string_pretty(&pong).expect("json serialization failed");
         let pong_record = Record::from_value("pong", pong_message);
         self.producer
@@ -149,7 +134,7 @@ async fn create_and_run_stm(ping: Ping) {
 
     let mut feed = VecDeque::from([]);
     feed.push_back(IncomingMessage::ReceivePing(ping.clone()));
-    feed.push_back(IncomingMessage::SendPong(Pong::new(ping.id)));
+    feed.push_back(IncomingMessage::SendPong(Pong::new(&ping)));
 
     let mut feeding_interval = time::interval(Duration::from_millis(100));
     feeding_interval.tick().await;
