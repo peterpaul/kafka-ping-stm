@@ -2,7 +2,7 @@ use kafka_ping_stm::{Ping, Pong};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
-use log::info;
+use log::{debug, info};
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
@@ -10,6 +10,7 @@ use oblivious_state_machine::{
 use std::collections::VecDeque;
 use std::time::Duration;
 use tokio::{select, time};
+use uuid::Uuid;
 
 #[derive(Debug)]
 enum IncomingMessage {
@@ -129,12 +130,12 @@ impl State<Types> for SendingPong {
     }
 }
 
-async fn create_and_run_stm(ping: Ping) {
+async fn create_and_run_stm(ping: Ping, address: Uuid) {
     let state: Box<dyn State<Types> + Send> = Box::new(ListeningForPing::new());
 
     let mut feed = VecDeque::from([]);
     feed.push_back(IncomingMessage::ReceivePing(ping.clone()));
-    feed.push_back(IncomingMessage::SendPong(Pong::new(&ping)));
+    feed.push_back(IncomingMessage::SendPong(Pong::new(&ping, address)));
 
     let mut feeding_interval = time::interval(Duration::from_millis(100));
     feeding_interval.tick().await;
@@ -165,6 +166,9 @@ async fn create_and_run_stm(ping: Ping) {
 async fn main() {
     pretty_env_logger::init();
 
+    let address = Uuid::new_v4();
+    info!("My address: {}", address);
+
     let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
         .with_topic("ping".to_owned())
         .with_fallback_offset(FetchOffset::Earliest)
@@ -178,8 +182,12 @@ async fn main() {
                 // parse json message, ideally this is done inside the tokio task
                 let ping: Ping =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
-                // spawn a separate tokio task which runs the oblivious STM
-                tokio::spawn(async move { create_and_run_stm(ping).await });
+                if ping.envelope.is_directed_at(address) {
+                    // spawn a separate tokio task which runs the oblivious STM
+                    tokio::spawn(async move { create_and_run_stm(ping, address).await });
+                } else {
+                    debug!("Dropped: {:?}", ping);
+                }
             }
             consumer.consume_messageset(msg_result).unwrap();
         }

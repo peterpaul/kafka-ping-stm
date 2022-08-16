@@ -2,7 +2,7 @@ use kafka_ping_stm::{Ping, Pong};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
-use log::info;
+use log::{debug, info};
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
@@ -10,6 +10,7 @@ use oblivious_state_machine::{
 use std::collections::VecDeque;
 use std::time::Duration;
 use tokio::{select, time};
+use uuid::Uuid;
 
 #[derive(Debug)]
 enum IncomingMessage {
@@ -113,7 +114,7 @@ impl State<Types> for ListeningForPong {
     ) -> DeliveryStatus<IncomingMessage, <Types as StateTypes>::Err> {
         match message {
             IncomingMessage::ReceivePong(ref pong) => {
-                if pong.correlation_id == self.sent_ping.correlation_id {
+                if pong.envelope.correlation_id == self.sent_ping.envelope.correlation_id {
                     self.receive_pong(pong.clone());
                     DeliveryStatus::Delivered
                 } else {
@@ -137,6 +138,9 @@ impl State<Types> for ListeningForPong {
 async fn main() {
     pretty_env_logger::init();
 
+    let address = Uuid::new_v4();
+    info!("My address: {}", address);
+
     let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
         .with_topic("pong".to_owned())
         .with_fallback_offset(FetchOffset::Earliest)
@@ -144,7 +148,7 @@ async fn main() {
         .create()
         .expect("invalid consumer config");
 
-    let mut feed = VecDeque::from([IncomingMessage::SendPing(Ping::new())]);
+    let mut feed = VecDeque::from([IncomingMessage::SendPing(Ping::new(address))]);
     let state: Box<dyn State<Types> + Send> = Box::new(SendingPing::new());
 
     let mut feeding_interval = time::interval(Duration::from_millis(100));
@@ -161,7 +165,11 @@ async fn main() {
                 // let _key: &str = std::str::from_utf8(msg.key).unwrap();
                 let pong: Pong =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Pong");
-                feed.push_back(IncomingMessage::ReceivePong(pong));
+                if pong.envelope.is_directed_at(address) {
+                    feed.push_back(IncomingMessage::ReceivePong(pong));
+                } else {
+                    debug!("Dropped: {:?}", pong);
+                }
             }
         }
         select! {
