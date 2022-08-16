@@ -133,6 +133,7 @@ impl State<Types> for SendingPong {
 async fn create_and_run_stm(ping: Ping, address: Uuid) {
     let state: Box<dyn State<Types> + Send> = Box::new(ListeningForPing::new());
 
+    // prepare the feed of messageset
     let mut feed = VecDeque::from([]);
     feed.push_back(IncomingMessage::ReceivePing(ping.clone()));
     feed.push_back(IncomingMessage::SendPong(Pong::new(&ping, address)));

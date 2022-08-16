@@ -249,21 +249,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kafka-pong-stm"
-version = "0.1.0"
-dependencies = [
- "kafka",
- "kafka-ping-stm",
- "log",
- "oblivious_state_machine",
- "pretty_env_logger 0.3.1",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"

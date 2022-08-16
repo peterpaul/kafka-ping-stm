@@ -65,15 +65,16 @@ The Ping client is implemented as a single-shot CLI application.
 In order to run the Ping component with logging, set ~RUST_LOG~, e.g.:
 
 #+begin_src bash
-  RUST_LOG=trace cargo run --bin kafka-ping-stm
+  RUST_LOG=trace cargo run --bin ping
 #+end_src
 
 Or spawn many concurrent tasks:
 
 #+begin_src bash
+  cargo build --release
   for i in {0..31};
   do
-      RUST_LOG=info target/release/kafka-ping-stm &
+      RUST_LOG=info target/release/ping &
   done
 #+end_src
 
@@ -95,7 +96,7 @@ The Ping server is implemented using ~tokio~. For each incoming message, a new t
 In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
 
 #+begin_src bash
-  RUST_LOG=info cargo run --bin kafka-pong-stm
+  RUST_LOG=info cargo run --bin pong
 #+end_src
 
 ** Pong state machine
