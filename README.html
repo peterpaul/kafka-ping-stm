@@ -3,7 +3,7 @@
 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
-<!-- 2022-08-16 Tue 13:57 -->
+<!-- 2022-08-25 Thu 11:27 -->
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>&lrm;</title>
@@ -200,32 +200,32 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents" role="doc-toc">
 <ul>
-<li><a href="#orgba4a005">1. Ping application</a></li>
-<li><a href="#org29991a1">2. Setup development environment</a></li>
-<li><a href="#org1c866cd">3. Ping Client</a>
+<li><a href="#org30b224c">1. Ping application</a></li>
+<li><a href="#orgab0c038">2. Setup development environment</a></li>
+<li><a href="#org49877a3">3. Ping Client</a>
 <ul>
-<li><a href="#org3d8c878">3.1. Ping state machine</a></li>
+<li><a href="#orgf5946e4">3.1. Ping state machine</a></li>
 </ul>
 </li>
-<li><a href="#org6335d04">4. Ping Server</a>
+<li><a href="#org05e4e13">4. Ping Server</a>
 <ul>
-<li><a href="#orgd21475b">4.1. Pong state machine</a></li>
-<li><a href="#orgb735041">4.2. Making this a server</a></li>
+<li><a href="#org43a1940">4.1. Pong state machine</a></li>
+<li><a href="#org8f80600">4.2. Making this a server</a></li>
 </ul>
 </li>
-<li><a href="#org7f3918c">5. TODO</a></li>
+<li><a href="#org7da2039">5. TODO</a></li>
 </ul>
 </div>
 </div>
-<div id="outline-container-orgba4a005" class="outline-2">
-<h2 id="orgba4a005"><span class="section-number-2">1.</span> Ping application</h2>
+<div id="outline-container-org30b224c" class="outline-2">
+<h2 id="org30b224c"><span class="section-number-2">1.</span> Ping application</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 This application is a POC, implementing the following behaviour using Apache Kafka as broker:
 </p>
 
 
-<div id="org5310d99" class="figure">
+<div id="org419fdac" class="figure">
 <p><img src="architecture.svg" alt="architecture.svg" class="org-svg" />
 </p>
 </div>
@@ -236,8 +236,8 @@ Both the client and the server component are implemented in Rust using the <a hr
 </div>
 </div>
 
-<div id="outline-container-org29991a1" class="outline-2">
-<h2 id="org29991a1"><span class="section-number-2">2.</span> Setup development environment</h2>
+<div id="outline-container-orgab0c038" class="outline-2">
+<h2 id="orgab0c038"><span class="section-number-2">2.</span> Setup development environment</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 The development environment is setup using <code>docker-compose</code>, and consists of a Kafka server, including zookeeper, kafka-ui, schemaregistry and kafka-connect.
@@ -258,8 +258,8 @@ You can Contact Kafka UI at: <a href="http://localhost:8080/">http://localhost:8
 </div>
 </div>
 
-<div id="outline-container-org1c866cd" class="outline-2">
-<h2 id="org1c866cd"><span class="section-number-2">3.</span> Ping Client</h2>
+<div id="outline-container-org49877a3" class="outline-2">
+<h2 id="org49877a3"><span class="section-number-2">3.</span> Ping Client</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 The Ping client is implemented as a single-shot CLI application.
@@ -288,11 +288,11 @@ Or spawn many concurrent tasks:
 </div>
 </div>
 
-<div id="outline-container-org3d8c878" class="outline-3">
-<h3 id="org3d8c878"><span class="section-number-3">3.1.</span> Ping state machine</h3>
+<div id="outline-container-orgf5946e4" class="outline-3">
+<h3 id="orgf5946e4"><span class="section-number-3">3.1.</span> Ping state machine</h3>
 <div class="outline-text-3" id="text-3-1">
 
-<div id="org3aa39b4" class="figure">
+<div id="orgee9931c" class="figure">
 <p><img src="ping.svg" alt="ping.svg" class="org-svg" />
 </p>
 </div>
@@ -300,8 +300,8 @@ Or spawn many concurrent tasks:
 </div>
 </div>
 
-<div id="outline-container-org6335d04" class="outline-2">
-<h2 id="org6335d04"><span class="section-number-2">4.</span> Ping Server</h2>
+<div id="outline-container-org05e4e13" class="outline-2">
+<h2 id="org05e4e13"><span class="section-number-2">4.</span> Ping Server</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 The Ping server is implemented using <code>tokio</code>. For each incoming message, a new task is spawned, that will execute the STM.
@@ -317,19 +317,19 @@ In order to run the Pong component with logging, set <code>RUST_LOG</code>, e.g.
 </div>
 </div>
 
-<div id="outline-container-orgd21475b" class="outline-3">
-<h3 id="orgd21475b"><span class="section-number-3">4.1.</span> Pong state machine</h3>
+<div id="outline-container-org43a1940" class="outline-3">
+<h3 id="org43a1940"><span class="section-number-3">4.1.</span> Pong state machine</h3>
 <div class="outline-text-3" id="text-4-1">
 
-<div id="org66686d0" class="figure">
+<div id="orgfa21860" class="figure">
 <p><img src="pong.svg" alt="pong.svg" class="org-svg" />
 </p>
 </div>
 </div>
 </div>
 
-<div id="outline-container-orgb735041" class="outline-3">
-<h3 id="orgb735041"><span class="section-number-3">4.2.</span> Making this a server</h3>
+<div id="outline-container-org8f80600" class="outline-3">
+<h3 id="org8f80600"><span class="section-number-3">4.2.</span> Making this a server</h3>
 <div class="outline-text-3" id="text-4-2">
 <p>
 The Pong component is implemented as a server, for every incoming
@@ -338,7 +338,7 @@ tokio task that executes the oblivious state machine.
 </p>
 
 
-<div id="org03a6d18" class="figure">
+<div id="orgbfa05c3" class="figure">
 <p><img src="pong-server.svg" alt="pong-server.svg" class="org-svg" />
 </p>
 </div>
@@ -355,8 +355,8 @@ on the correlation id.
 </div>
 </div>
 
-<div id="outline-container-org7f3918c" class="outline-2">
-<h2 id="org7f3918c"><span class="section-number-2">5.</span> TODO</h2>
+<div id="outline-container-org7da2039" class="outline-2">
+<h2 id="org7da2039"><span class="section-number-2">5.</span> TODO</h2>
 <div class="outline-text-2" id="text-5">
 <ul class="org-ul">
 <li>Use <code>apache-avro = { version = "X.Y.Z", features = ["derive"] }</code> instead of JSON, and publish schema to schemaregistry.</li>
@@ -367,7 +367,7 @@ on the correlation id.
 </div>
 <div id="postamble" class="status">
 <p class="author">Author: Peterpaul Klein Haneveld</p>
-<p class="date">Created: 2022-08-16 Tue 13:57</p>
+<p class="date">Created: 2022-08-25 Thu 11:27</p>
 <p class="validation"><a href="https://validator.w3.org/check?uri=referer">Validate</a></p>
 </div>
 </body>

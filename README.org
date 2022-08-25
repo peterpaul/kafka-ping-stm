@@ -104,7 +104,8 @@ In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
 #+begin_src plantuml :file pong.svg
   [*] -> ListeningForPing
   ListeningForPing -> SendingPong: Ping
-  SendingPong -> [*]
+  SendingPong -> SentPong: PongSent
+  SentPong -> [*]
 #+end_src
 
 #+RESULTS:
