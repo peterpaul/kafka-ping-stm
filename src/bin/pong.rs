@@ -5,15 +5,10 @@ use kafka::producer::{Producer, Record, RequiredAcks};
 use log::{debug, info};
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
-    state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
+    state_machine::TimeBoundStateMachineRunner,
 };
 use std::collections::HashMap;
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::select;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -155,117 +150,6 @@ impl State<Types> for SentPong {
     }
 }
 
-fn send_pong(
-    producer: &mut Producer,
-    pong: Pong,
-    context: Arc<Mutex<Context>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    info!("Send Pong: {:?}", pong);
-    let pong_message = serde_json::to_string_pretty(&pong)?;
-    let pong_record = Record::from_value("pong", pong_message);
-    producer.send(&pong_record)?;
-    let ctx = context.lock().unwrap();
-    ctx.deliver(
-        &pong.envelope.correlation_id,
-        InboundMessage::PongSent(pong.clone()),
-    )
-    .unwrap();
-    Ok(())
-}
-
-struct Context {
-    stm_map: HashMap<Uuid, TimeBoundStateMachineRunner<Types>>,
-}
-
-impl Context {
-    fn new() -> Self {
-        Self {
-            stm_map: HashMap::new(),
-        }
-    }
-
-    fn create_stm(&mut self, correlation_id: Uuid, state: Box<dyn State<Types> + Send>) {
-        self.stm_map.insert(
-            correlation_id,
-            TimeBoundStateMachineRunner::new("Ping".to_owned(), state, Duration::from_secs(30)),
-        );
-    }
-
-    fn run(
-        &mut self,
-        correlation_id: &Uuid,
-    ) -> Option<(
-        UnboundedReceiver<Vec<Pong>>,
-        oneshot::Receiver<TimeBoundStateMachineResult<Types>>,
-    )> {
-        self.stm_map.get_mut(correlation_id).map(|stm| stm.run())
-    }
-
-    fn deliver(
-        &self,
-        correlation_id: &Uuid,
-        message: InboundMessage,
-    ) -> Result<(), InboundMessage> {
-        if let Some(stm) = self.stm_map.get(correlation_id) {
-            stm.deliver(message)
-        } else {
-            Err(message)
-        }
-    }
-
-    fn remove(&mut self, correlation_id: &Uuid) {
-        self.stm_map.remove(correlation_id);
-    }
-}
-
-async fn create_and_run_stm(
-    ping: Ping,
-    address: Uuid,
-    sender: mpsc::Sender<Pong>,
-    context: Arc<Mutex<Context>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let state: Box<dyn State<Types> + Send> = Box::new(ListeningForPing::new(address));
-    let (mut outgoing, mut result) = {
-        let mut ctx = context.lock().unwrap();
-
-        ctx.create_stm(ping.envelope.correlation_id, state);
-
-        let (outgoing, result) = ctx.run(&ping.envelope.correlation_id).unwrap();
-
-        ctx.deliver(
-            &ping.envelope.correlation_id,
-            InboundMessage::PingReceived(ping.clone()),
-        )
-        .unwrap();
-
-        (outgoing, result)
-    };
-
-    // TODO: Proper error handling
-    let res: TimeBoundStateMachineResult<Types> = loop {
-        select! {
-            outgoing_messages = outgoing.recv() => {
-                if let Some(messages) = outgoing_messages {
-                    for pong in messages {
-                        sender.send(pong)?;
-                    }
-                }
-            }
-            res = &mut result => {
-                break res?;
-            }
-        }
-    };
-
-    let _result =
-        res.unwrap_or_else(|err| panic!("State machine did not complete in time: {}", err));
-
-    //
-    let mut ctx = context.lock().unwrap();
-    ctx.remove(&ping.envelope.correlation_id);
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     pretty_env_logger::init();
@@ -284,42 +168,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         .with_required_acks(RequiredAcks::One)
         .create()?;
 
-    let (pong_tx, pong_rx) = mpsc::channel::<Pong>();
-
-    let context = Arc::new(Mutex::new(Context::new()));
-
-    // Create outbound message sender thread
-    {
-        let sender_context = (&context).clone();
-
-        let _sender_thread = std::thread::spawn(move || {
-            while let Ok(pong) = pong_rx.recv() {
-                send_pong(&mut producer, pong, (&sender_context).clone()).unwrap();
-            }
-            info!("Terminating sender_thread");
-        });
-    }
+    let mut stm_map = HashMap::new();
 
     loop {
         for msg_result in consumer.poll()?.iter() {
             for msg in msg_result.messages() {
-                // parse json message, ideally this is done inside the tokio task
                 let ping: Ping =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
                 if ping.envelope.is_directed_at(address) {
-                    // spawn a separate tokio task which runs the oblivious STM
-                    let tx = pong_tx.clone();
-                    let context = (&context).clone();
-                    tokio::spawn(
-                        async move { create_and_run_stm(ping, address, tx, context).await },
+                    let state: Box<dyn State<Types> + Send> =
+                        Box::new(ListeningForPing::new(address));
+
+                    let mut state_machine_runner = TimeBoundStateMachineRunner::new(
+                        "Pong".to_owned(),
+                        state,
+                        Duration::from_secs(5),
+                    );
+
+                    let (outgoing, result) = state_machine_runner.run();
+
+                    state_machine_runner
+                        .deliver(InboundMessage::PingReceived(ping.clone()))
+                        .unwrap();
+
+                    stm_map.insert(
+                        ping.envelope.correlation_id,
+                        (state_machine_runner, outgoing, result),
                     );
                 } else {
                     debug!("Dropped: {:?}", ping);
                 }
             }
-            // This could be problematic, if the ping was directed at a specific node and there are multiple pong nodes running.
             consumer.consume_messageset(msg_result)?;
         }
         consumer.commit_consumed()?;
+
+        let ids_to_remove: Vec<Uuid> = stm_map
+            .iter_mut()
+            .filter_map(|(correlation_id, (stm, outgoing, result))| {
+                if let Ok(messages) = outgoing.try_recv() {
+                    for pong in messages {
+                        // NOTE this blocks the main thread
+                        info!("Send Pong: {:?}", pong);
+                        let pong_message = serde_json::to_string_pretty(&pong).unwrap();
+                        let pong_record = Record::from_value("pong", pong_message);
+                        // alternatively use producer.send_all for better performance
+                        producer.send(&pong_record).unwrap();
+                        stm.deliver(InboundMessage::PongSent(pong.clone())).unwrap();
+                    }
+                }
+                if let Ok(res) = result.try_recv() {
+                    let res =
+                        res.unwrap_or_else(|_| panic!("State machine did not complete in time"));
+                    info!("State machine ended at: <{}>", res.desc());
+                    Some(*correlation_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for id in ids_to_remove.iter() {
+            stm_map.remove(id);
+        }
     }
 }

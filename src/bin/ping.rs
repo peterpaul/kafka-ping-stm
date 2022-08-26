@@ -92,17 +92,6 @@ impl State<Types> for ListeningForPong {
     }
 }
 
-fn send_ping(
-    producer: &mut Producer,
-    ping: Ping,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    info!("Send Ping: {:?}", ping);
-    let ping_message = serde_json::to_string_pretty(&ping)?;
-    let ping_record = Record::from_value("ping", ping_message);
-    producer.send(&ping_record)?;
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     pretty_env_logger::init();
@@ -141,14 +130,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                 }
             }
             // This could be problematic, if the ping was directed at a specific node and there are multiple pong nodes running.
-            consumer.consume_messageset(msg_result)?;
+            // consumer.consume_messageset(msg_result)?;
         }
-        consumer.commit_consumed()?;
+        // consumer.commit_consumed()?;
+
         select! {
             outgoing_messages = outgoing.recv() => {
                 if let Some(messages) = outgoing_messages {
                     for ping in messages {
-                        send_ping(&mut producer, ping)?;
+                        info!("Send Ping: {:?}", ping);
+                        let ping_message = serde_json::to_string_pretty(&ping).unwrap();
+                        let ping_record = Record::from_value("ping", ping_message);
+                        producer.send(&ping_record).unwrap();
                     }
                 }
             }
@@ -158,7 +151,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         }
     };
 
-    let _result = res.unwrap_or_else(|_| panic!("State machine did not complete in time"));
+    let terminal_state = res.unwrap_or_else(|_| panic!("State machine did not complete in time"));
+
+    info!("State machine ended at: <{}>", terminal_state.desc());
 
     Ok(())
 }
