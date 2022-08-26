@@ -2,13 +2,11 @@ use kafka_ping_stm::{Ping, Pong};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
-use log::{debug, info};
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
 };
 use std::time::Duration;
-use tokio::select;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -64,7 +62,7 @@ impl ListeningForPong {
     }
 
     fn receive_pong(&mut self, pong: Pong) {
-        info!("Received Pong: {:?}", pong);
+        log::info!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
     }
 }
@@ -97,25 +95,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     pretty_env_logger::init();
 
     let address = Uuid::new_v4();
-    info!("My address: {}", address);
+    log::info!("My address: {}", address);
 
     let mut producer = Producer::from_hosts(vec!["localhost:9092".to_owned()])
         .with_ack_timeout(Duration::from_secs(1))
         .with_required_acks(RequiredAcks::One)
-        .create()
-        .unwrap();
+        .create()?;
 
     let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
         .with_topic("pong".to_owned())
         .with_fallback_offset(FetchOffset::Earliest)
         .with_group("my_consumer_group".to_owned())
-        .create()
-        .expect("invalid consumer config");
+        .create()?;
 
     let state: Box<dyn State<Types> + Send> = Box::new(SendingPing::new(Ping::new(address)));
 
-    let mut state_machine_runner =
-        TimeBoundStateMachineRunner::new("Ping".to_owned(), state, Duration::from_secs(5));
+    let mut state_machine_runner = TimeBoundStateMachineRunner::new(
+        format!("Ping:{}", address),
+        state,
+        Duration::from_secs(5),
+    );
 
     let (mut outgoing, mut result) = state_machine_runner.run();
 
@@ -126,22 +125,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                 if pong.envelope.is_directed_at(address) {
                     state_machine_runner.deliver(pong).unwrap();
                 } else {
-                    debug!("Dropped: {:?}", pong);
+                    log::debug!("Dropped: {:?}", pong);
                 }
             }
             // This could be problematic, if the ping was directed at a specific node and there are multiple pong nodes running.
-            // consumer.consume_messageset(msg_result)?;
+            consumer.consume_messageset(msg_result)?;
         }
-        // consumer.commit_consumed()?;
+        consumer.commit_consumed()?;
 
-        select! {
+        tokio::select! {
             outgoing_messages = outgoing.recv() => {
                 if let Some(messages) = outgoing_messages {
                     for ping in messages {
-                        info!("Send Ping: {:?}", ping);
-                        let ping_message = serde_json::to_string_pretty(&ping).unwrap();
+                        log::info!("Send Ping: {:?}", ping);
+                        let ping_message = serde_json::to_string_pretty(&ping)?;
                         let ping_record = Record::from_value("ping", ping_message);
-                        producer.send(&ping_record).unwrap();
+                        producer.send(&ping_record)?;
                     }
                 }
             }
@@ -153,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
     let terminal_state = res.unwrap_or_else(|_| panic!("State machine did not complete in time"));
 
-    info!("State machine ended at: <{}>", terminal_state.desc());
+    log::info!("State machine ended at: <{}>", terminal_state.desc());
 
     Ok(())
 }

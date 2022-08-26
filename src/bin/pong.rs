@@ -1,8 +1,7 @@
-use kafka_ping_stm::{Ping, Pong};
+use kafka_ping_stm::{Address, Ping, Pong};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
-use log::{debug, info};
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::TimeBoundStateMachineRunner,
@@ -40,7 +39,7 @@ impl ListeningForPing {
     }
 
     fn receive_ping(&mut self, ping: Ping) {
-        info!("Received Ping: {:?}", ping);
+        log::info!("Received Ping: {:?}", ping);
         self.received_ping = Some(ping);
     }
 }
@@ -155,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     pretty_env_logger::init();
 
     let address = Uuid::new_v4();
-    info!("My address: {}", address);
+    log::info!("My address: {}", address);
 
     let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
         .with_topic("ping".to_owned())
@@ -180,7 +179,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                         Box::new(ListeningForPing::new(address));
 
                     let mut state_machine_runner = TimeBoundStateMachineRunner::new(
-                        "Pong".to_owned(),
+                        format!(
+                            "Pong:{}",
+                            if let Address::Direct(sender) = ping.envelope.sender {
+                                sender
+                            } else {
+                                panic!("Sender must be a Direct address!")
+                            }
+                        ),
                         state,
                         Duration::from_secs(5),
                     );
@@ -196,37 +202,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                         (state_machine_runner, outgoing, result),
                     );
                 } else {
-                    debug!("Dropped: {:?}", ping);
+                    log::debug!("Dropped: {:?}", ping);
                 }
             }
             consumer.consume_messageset(msg_result)?;
         }
         consumer.commit_consumed()?;
 
-        let ids_to_remove: Vec<Uuid> = stm_map
-            .iter_mut()
-            .filter_map(|(correlation_id, (stm, outgoing, result))| {
-                if let Ok(messages) = outgoing.try_recv() {
-                    for pong in messages {
-                        // NOTE this blocks the main thread
-                        info!("Send Pong: {:?}", pong);
-                        let pong_message = serde_json::to_string_pretty(&pong).unwrap();
-                        let pong_record = Record::from_value("pong", pong_message);
-                        // alternatively use producer.send_all for better performance
-                        producer.send(&pong_record).unwrap();
-                        stm.deliver(InboundMessage::PongSent(pong.clone())).unwrap();
+        let ids_to_remove = {
+            let mut ids_to_remove = Vec::new();
+            for (correlation_id, (stm, outgoing, result)) in stm_map.iter_mut() {
+                tokio::select! {
+                    Some(messages) = outgoing.recv() => {
+                        for pong in messages.into_iter() {
+                            log::info!("Send Pong: {:?}", pong);
+                            let pong_message = serde_json::to_string_pretty(&pong)?;
+                            let pong_record = Record::from_value("pong", pong_message);
+                            // alternatively use producer.send_all for better performance
+                            producer.send(&pong_record)?;
+                            stm.deliver(InboundMessage::PongSent(pong)).unwrap();
+                        }
+                    }
+                    res = result => {
+                        let res = res
+                            .expect("Result from State Machine must be communicated")
+                            .unwrap_or_else(|_| panic!("State machine did not complete in time"));
+                        log::info!("State machine ended at: <{}>", res.desc());
+                        ids_to_remove.push(*correlation_id);
                     }
                 }
-                if let Ok(res) = result.try_recv() {
-                    let res =
-                        res.unwrap_or_else(|_| panic!("State machine did not complete in time"));
-                    info!("State machine ended at: <{}>", res.desc());
-                    Some(*correlation_id)
-                } else {
-                    None
-                }
-            })
-            .collect();
+            }
+            ids_to_remove
+        };
 
         for id in ids_to_remove.iter() {
             stm_map.remove(id);
