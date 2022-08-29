@@ -170,10 +170,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     let mut stm_map = HashMap::new();
 
     loop {
+        log::debug!("in consumer loop");
         for msg_result in consumer.poll()?.iter() {
+            log::debug!("polled messages: {}", msg_result.messages().len());
             for msg in msg_result.messages() {
                 let ping: Ping =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
+                log::debug!("Incoming ping message: {:?}", ping);
                 if ping.envelope.is_directed_at(address) {
                     let state: Box<dyn State<Types> + Send> =
                         Box::new(ListeningForPing::new(address));
