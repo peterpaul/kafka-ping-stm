@@ -22,12 +22,13 @@ impl StateTypes for Types {
 
 #[derive(Debug)]
 struct SendingPing {
+    span: tracing::Span,
     ping_to_send: Ping,
 }
 
 impl SendingPing {
-    fn new(ping_to_send: Ping) -> Self {
-        Self { ping_to_send }
+    fn new(span: tracing::Span, ping_to_send: Ping) -> Self {
+        Self { span, ping_to_send }
     }
 }
 
@@ -36,19 +37,20 @@ impl State<Types> for SendingPing {
         "Sending Ping".to_owned()
     }
 
-    #[tracing::instrument(fields(session_id = self.ping_to_send.envelope.session_id.to_string()))]
+    #[tracing::instrument(parent = &self.span)]
     fn initialize(&self) -> Vec<<Types as StateTypes>::Out> {
         vec![self.ping_to_send.clone()]
     }
 
-    #[tracing::instrument(fields(session_id = self.ping_to_send.envelope.session_id.to_string()))]
+    #[tracing::instrument(parent = &self.span)]
     fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
         DeliveryStatus::Unexpected(message)
     }
 
-    #[tracing::instrument(fields(session_id = self.ping_to_send.envelope.session_id.to_string()))]
+    #[tracing::instrument(parent = &self.span)]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         Ok(Transition::Next(Box::new(ListeningForPong::new(
+            self.span.clone(),
             self.ping_to_send.clone(),
         ))))
     }
@@ -56,19 +58,21 @@ impl State<Types> for SendingPing {
 
 #[derive(Debug)]
 struct ListeningForPong {
+    span: tracing::Span,
     sent_ping: Ping,
     received_pong: Option<Pong>,
 }
 
 impl ListeningForPong {
-    fn new(sent_ping: Ping) -> Self {
+    fn new(span: tracing::Span, sent_ping: Ping) -> Self {
         Self {
+            span,
             sent_ping,
             received_pong: None,
         }
     }
 
-    #[tracing::instrument(fields(session_id = self.sent_ping.envelope.session_id.to_string()))]
+    #[tracing::instrument]
     fn receive_pong(&mut self, pong: Pong) {
         log::info!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
@@ -80,7 +84,7 @@ impl State<Types> for ListeningForPong {
         "Waiting for Pong".to_owned()
     }
 
-    #[tracing::instrument(fields(session_id = self.sent_ping.envelope.session_id.to_string()))]
+    #[tracing::instrument(parent = &self.span)]
     fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
         if message.envelope.session_id == self.sent_ping.envelope.session_id {
             self.receive_pong(message);
@@ -90,7 +94,7 @@ impl State<Types> for ListeningForPong {
         }
     }
 
-    #[tracing::instrument(fields(session_id = self.sent_ping.envelope.session_id.to_string()))]
+    #[tracing::instrument(parent = &self.span)]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.received_pong {
             Some(_pong) => Transition::Terminal,
@@ -100,6 +104,7 @@ impl State<Types> for ListeningForPong {
     }
 }
 
+#[tracing::instrument(skip(producer))]
 fn kafka_send_pings(
     producer: &mut Producer,
     pings: Vec<Ping>,
@@ -176,7 +181,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         .with_group("my_consumer_group".to_owned())
         .create()?;
 
-    let state: Box<dyn State<Types> + Send> = Box::new(SendingPing::new(Ping::new(address)));
+    let ping_span = tracing::info_span!("ping span");
+    let _ = ping_span.enter();
+
+    let state: Box<dyn State<Types> + Send> =
+        Box::new(SendingPing::new(ping_span, Ping::new(address)));
 
     let mut state_machine_runner = TimeBoundStateMachineRunner::new(
         format!("Ping:{}", address),
