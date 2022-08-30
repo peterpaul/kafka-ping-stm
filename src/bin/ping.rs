@@ -36,17 +36,17 @@ impl State<Types> for SendingPing {
         "Sending Ping".to_owned()
     }
 
-    #[tracing::instrument(fields(correlation_id = self.ping_to_send.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.ping_to_send.envelope.session_id.to_string()))]
     fn initialize(&self) -> Vec<<Types as StateTypes>::Out> {
         vec![self.ping_to_send.clone()]
     }
 
-    #[tracing::instrument(fields(correlation_id = self.ping_to_send.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.ping_to_send.envelope.session_id.to_string()))]
     fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
         DeliveryStatus::Unexpected(message)
     }
 
-    #[tracing::instrument(fields(correlation_id = self.ping_to_send.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.ping_to_send.envelope.session_id.to_string()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         Ok(Transition::Next(Box::new(ListeningForPong::new(
             self.ping_to_send.clone(),
@@ -68,7 +68,7 @@ impl ListeningForPong {
         }
     }
 
-    #[tracing::instrument(fields(correlation_id = self.sent_ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.sent_ping.envelope.session_id.to_string()))]
     fn receive_pong(&mut self, pong: Pong) {
         log::info!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
@@ -80,9 +80,9 @@ impl State<Types> for ListeningForPong {
         "Waiting for Pong".to_owned()
     }
 
-    #[tracing::instrument(fields(correlation_id = self.sent_ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.sent_ping.envelope.session_id.to_string()))]
     fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
-        if message.envelope.correlation_id == self.sent_ping.envelope.correlation_id {
+        if message.envelope.session_id == self.sent_ping.envelope.session_id {
             self.receive_pong(message);
             DeliveryStatus::Delivered
         } else {
@@ -90,7 +90,7 @@ impl State<Types> for ListeningForPong {
         }
     }
 
-    #[tracing::instrument(fields(correlation_id = self.sent_ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.sent_ping.envelope.session_id.to_string()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.received_pong {
             Some(_pong) => Transition::Terminal,

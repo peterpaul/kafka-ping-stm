@@ -20,11 +20,11 @@ enum InboundMessage {
 }
 
 impl InboundMessage {
-    fn correlation_id(&self) -> Uuid {
+    fn session_id(&self) -> Uuid {
         use InboundMessage::*;
         match self {
-            PingReceived(ping) => ping.envelope.correlation_id,
-            PongSent(pong) => pong.envelope.correlation_id,
+            PingReceived(ping) => ping.envelope.session_id,
+            PongSent(pong) => pong.envelope.session_id,
         }
     }
 }
@@ -51,7 +51,7 @@ impl ListeningForPing {
         }
     }
 
-    #[tracing::instrument(fields(correlation_id = ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = ping.envelope.session_id.to_string()))]
     fn receive_ping(&mut self, ping: Ping) {
         log::info!("Received Ping: {:?}", ping);
         self.received_ping = Some(ping);
@@ -63,7 +63,7 @@ impl State<Types> for ListeningForPing {
         "Waiting for Ping".to_owned()
     }
 
-    #[tracing::instrument(fields(correlation_id = message.correlation_id().to_string()))]
+    #[tracing::instrument(fields(session_id = message.session_id().to_string()))]
     fn deliver(
         &mut self,
         message: InboundMessage,
@@ -77,7 +77,7 @@ impl State<Types> for ListeningForPing {
         }
     }
 
-    #[tracing::instrument(fields(correlation_id = self.received_ping.as_ref().map_or("".to_string(), |p| p.envelope.correlation_id.to_string())))]
+    #[tracing::instrument(fields(session_id = self.received_ping.as_ref().map_or("".to_string(), |p| p.envelope.session_id.to_string())))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.received_ping {
             Some(ping) => {
@@ -105,7 +105,7 @@ impl SendingPong {
         }
     }
 
-    #[tracing::instrument(fields(correlation_id = self.received_ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.received_ping.envelope.session_id.to_string()))]
     fn get_pong(&self) -> Pong {
         Pong::new(&self.received_ping, self.my_address)
     }
@@ -116,12 +116,12 @@ impl State<Types> for SendingPong {
         "Sending Pong".to_owned()
     }
 
-    #[tracing::instrument(fields(correlation_id = self.received_ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.received_ping.envelope.session_id.to_string()))]
     fn initialize(&self) -> Vec<Pong> {
         vec![self.get_pong()]
     }
 
-    #[tracing::instrument(fields(correlation_id = self.received_ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.received_ping.envelope.session_id.to_string()))]
     fn deliver(
         &mut self,
         message: InboundMessage,
@@ -135,7 +135,7 @@ impl State<Types> for SendingPong {
         }
     }
 
-    #[tracing::instrument(fields(correlation_id = self.received_ping.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.received_ping.envelope.session_id.to_string()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.sent_pong {
             Some(pong) => Transition::Next(Box::new(SentPong::new(pong.clone()))),
@@ -161,7 +161,7 @@ impl State<Types> for SentPong {
         "Sent Pong".to_owned()
     }
 
-    #[tracing::instrument(fields(correlation_id = self.pong.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.pong.envelope.session_id.to_string()))]
     fn deliver(
         &mut self,
         message: <Types as StateTypes>::In,
@@ -169,7 +169,7 @@ impl State<Types> for SentPong {
         DeliveryStatus::Unexpected(message)
     }
 
-    #[tracing::instrument(fields(correlation_id = self.pong.envelope.correlation_id.to_string()))]
+    #[tracing::instrument(fields(session_id = self.pong.envelope.session_id.to_string()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         Ok(Transition::Terminal)
     }
@@ -244,7 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                         .unwrap();
 
                     stm_map.insert(
-                        ping.envelope.correlation_id,
+                        ping.envelope.session_id,
                         (state_machine_runner, outgoing, result),
                     );
                 } else {
@@ -257,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
         let ids_to_remove = {
             let mut ids_to_remove = Vec::new();
-            for (correlation_id, (stm, outgoing, result)) in stm_map.iter_mut() {
+            for (session_id, (stm, outgoing, result)) in stm_map.iter_mut() {
                 tokio::select! {
                     Some(messages) = outgoing.recv() => {
                         for pong in messages.into_iter() {
@@ -274,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                             .expect("Result from State Machine must be communicated")
                             .unwrap_or_else(|_| panic!("State machine did not complete in time"));
                         log::info!("State machine ended at: <{}>", res.desc());
-                        ids_to_remove.push(*correlation_id);
+                        ids_to_remove.push(*session_id);
                     }
                 }
             }

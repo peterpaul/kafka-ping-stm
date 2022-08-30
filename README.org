@@ -81,9 +81,9 @@ Or spawn many concurrent tasks:
 ** Ping state machine
 
 #+begin_src plantuml :file ping.svg
-  [*] -> SendingPing: correlation_id
+  [*] -> SendingPing: session_id
   SendingPing -> ListeningForPong
-  ListeningForPong -> [*]: Pong(correlation_id)
+  ListeningForPong -> [*]: Pong(session_id)
 #+end_src
 
 #+RESULTS:

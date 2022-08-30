@@ -20,15 +20,15 @@ impl Address {
 pub struct Envelope {
     pub sender: Address,
     pub receiver: Address,
-    pub correlation_id: Uuid,
+    pub session_id: Uuid,
 }
 
 impl Envelope {
-    fn new(sender: Address, receiver: Address, correlation_id: Uuid) -> Self {
+    fn new(sender: Address, receiver: Address, session_id: Uuid) -> Self {
         Self {
             sender,
             receiver,
-            correlation_id,
+            session_id,
         }
     }
 
@@ -37,7 +37,7 @@ impl Envelope {
     }
 
     fn respond_to(&self, sender: Uuid) -> Self {
-        Self::new(Address::Direct(sender), self.sender, self.correlation_id)
+        Self::new(Address::Direct(sender), self.sender, self.session_id)
     }
 
     pub fn is_directed_at(&self, address: Uuid) -> bool {
