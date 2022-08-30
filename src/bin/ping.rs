@@ -6,8 +6,10 @@ use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
 };
+use opentelemetry::global;
 use std::time::Duration;
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -18,6 +20,7 @@ impl StateTypes for Types {
     type Err = String;
 }
 
+#[derive(Debug)]
 struct SendingPing {
     ping_to_send: Ping,
 }
@@ -33,14 +36,17 @@ impl State<Types> for SendingPing {
         "Sending Ping".to_owned()
     }
 
+    #[tracing::instrument(fields(correlation_id = self.ping_to_send.envelope.correlation_id.to_string()))]
     fn initialize(&self) -> Vec<<Types as StateTypes>::Out> {
         vec![self.ping_to_send.clone()]
     }
 
+    #[tracing::instrument(fields(correlation_id = self.ping_to_send.envelope.correlation_id.to_string()))]
     fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
         DeliveryStatus::Unexpected(message)
     }
 
+    #[tracing::instrument(fields(correlation_id = self.ping_to_send.envelope.correlation_id.to_string()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         Ok(Transition::Next(Box::new(ListeningForPong::new(
             self.ping_to_send.clone(),
@@ -62,6 +68,7 @@ impl ListeningForPong {
         }
     }
 
+    #[tracing::instrument(fields(correlation_id = self.sent_ping.envelope.correlation_id.to_string()))]
     fn receive_pong(&mut self, pong: Pong) {
         log::info!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
@@ -73,6 +80,7 @@ impl State<Types> for ListeningForPong {
         "Waiting for Pong".to_owned()
     }
 
+    #[tracing::instrument(fields(correlation_id = self.sent_ping.envelope.correlation_id.to_string()))]
     fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
         if message.envelope.correlation_id == self.sent_ping.envelope.correlation_id {
             self.receive_pong(message);
@@ -82,6 +90,7 @@ impl State<Types> for ListeningForPong {
         }
     }
 
+    #[tracing::instrument(fields(correlation_id = self.sent_ping.envelope.correlation_id.to_string()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.received_pong {
             Some(_pong) => Transition::Terminal,
@@ -133,7 +142,25 @@ fn kafka_read_pongs(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    pretty_env_logger::init();
+    // Allows you to pass along context (i.e., trace IDs) across services
+    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+    // Sets up the machinery needed to export data to Jaeger
+    // There are other OTel crates that provide pipelines for the vendors
+    // mentioned earlier.
+    let tracer = opentelemetry_jaeger::new_pipeline()
+        .with_service_name("ping")
+        .install_simple()?;
+
+    // Create a tracing layer with the configured tracer
+    let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    // The SubscriberExt and SubscriberInitExt traits are needed to extend the
+    // Registry to accept `opentelemetry (the OpenTelemetryLayer type).
+    tracing_subscriber::registry()
+        .with(opentelemetry)
+        // Continue logging to stdout
+        .with(fmt::Layer::default())
+        .try_init()?;
 
     let address = Uuid::new_v4();
     log::info!("My address: {}", address);
