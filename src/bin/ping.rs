@@ -1,4 +1,4 @@
-use kafka_ping_stm::{Ping, Pong};
+use kafka_ping_stm::{Address, Envelope, PartyId, Ping, Pong};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
@@ -15,19 +15,19 @@ use uuid::Uuid;
 #[derive(Debug)]
 struct Types;
 impl StateTypes for Types {
-    type In = Pong;
-    type Out = Ping;
+    type In = Envelope<Pong>;
+    type Out = Envelope<Ping>;
     type Err = String;
 }
 
 #[derive(Debug)]
 struct SendingPing {
     span: tracing::Span,
-    ping_to_send: Ping,
+    ping_to_send: Envelope<Ping>,
 }
 
 impl SendingPing {
-    fn new(span: tracing::Span, ping_to_send: Ping) -> Self {
+    fn new(span: tracing::Span, ping_to_send: Envelope<Ping>) -> Self {
         Self { span, ping_to_send }
     }
 }
@@ -43,7 +43,10 @@ impl State<Types> for SendingPing {
     }
 
     #[tracing::instrument(parent = &self.span)]
-    fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
+    fn deliver(
+        &mut self,
+        message: Envelope<Pong>,
+    ) -> DeliveryStatus<Envelope<Pong>, <Types as StateTypes>::Err> {
         DeliveryStatus::Unexpected(message)
     }
 
@@ -59,12 +62,12 @@ impl State<Types> for SendingPing {
 #[derive(Debug)]
 struct ListeningForPong {
     span: tracing::Span,
-    sent_ping: Ping,
-    received_pong: Option<Pong>,
+    sent_ping: Envelope<Ping>,
+    received_pong: Option<Envelope<Pong>>,
 }
 
 impl ListeningForPong {
-    fn new(span: tracing::Span, sent_ping: Ping) -> Self {
+    fn new(span: tracing::Span, sent_ping: Envelope<Ping>) -> Self {
         Self {
             span,
             sent_ping,
@@ -73,7 +76,7 @@ impl ListeningForPong {
     }
 
     #[tracing::instrument]
-    fn receive_pong(&mut self, pong: Pong) {
+    fn receive_pong(&mut self, pong: Envelope<Pong>) {
         log::info!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
     }
@@ -85,8 +88,11 @@ impl State<Types> for ListeningForPong {
     }
 
     #[tracing::instrument(parent = &self.span)]
-    fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, <Types as StateTypes>::Err> {
-        if message.envelope.session_id == self.sent_ping.envelope.session_id {
+    fn deliver(
+        &mut self,
+        message: Envelope<Pong>,
+    ) -> DeliveryStatus<Envelope<Pong>, <Types as StateTypes>::Err> {
+        if message.body().session_id() == self.sent_ping.body().session_id() {
             self.receive_pong(message);
             DeliveryStatus::Delivered
         } else {
@@ -107,7 +113,7 @@ impl State<Types> for ListeningForPong {
 #[tracing::instrument(skip(producer))]
 fn kafka_send_pings(
     producer: &mut Producer,
-    pings: Vec<Ping>,
+    pings: Vec<Envelope<Ping>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     for ping in pings {
         log::info!("Send Ping: {:?}", ping);
@@ -121,7 +127,7 @@ fn kafka_send_pings(
 fn kafka_read_pongs(
     mut consumer: Consumer,
     address: Uuid,
-    pong_tx: UnboundedSender<Pong>,
+    pong_tx: UnboundedSender<Envelope<Pong>>,
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     while shutdown_rx.try_recv().is_err() {
@@ -129,9 +135,9 @@ fn kafka_read_pongs(
         for msg_result in consumer.poll()?.iter() {
             log::debug!("polled messages: {}", msg_result.messages().len());
             for msg in msg_result.messages() {
-                let pong: Pong = serde_json::from_slice(msg.value)?;
+                let pong: Envelope<Pong> = serde_json::from_slice(msg.value)?;
                 log::debug!("Incoming pong message: {:?}", pong);
-                if pong.envelope.is_directed_at(address) {
+                if pong.is_directed_at(address) {
                     pong_tx.send(pong)?;
                 } else {
                     log::debug!("Dropped: {:?}", pong);
@@ -184,8 +190,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     let ping_span = tracing::info_span!("ping span");
     let _ = ping_span.enter();
 
-    let state: Box<dyn State<Types> + Send> =
-        Box::new(SendingPing::new(ping_span, Ping::new(address)));
+    let state: Box<dyn State<Types> + Send> = Box::new(SendingPing::new(
+        ping_span,
+        Envelope::new(
+            PartyId(address),
+            Address::Broadcast,
+            Ping::new(Uuid::new_v4()),
+        ),
+    ));
 
     let mut state_machine_runner = TimeBoundStateMachineRunner::new(
         format!("Ping:{}", address),
@@ -196,7 +208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     let (mut outgoing, mut result) = state_machine_runner.run();
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    let (pong_tx, mut pong_rx) = mpsc::unbounded_channel::<Pong>();
+    let (pong_tx, mut pong_rx) = mpsc::unbounded_channel::<Envelope<Pong>>();
 
     let kafka_receiver_task = tokio::task::spawn_blocking(move || {
         kafka_read_pongs(consumer, address, pong_tx, shutdown_rx).unwrap();

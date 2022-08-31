@@ -1,72 +1,81 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartyId(pub Uuid);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Address {
     Broadcast,
-    Direct(Uuid),
+    Multiple(Vec<PartyId>),
+    Single(PartyId),
 }
 
-impl Address {
-    fn is_for(&self, address: Uuid) -> bool {
-        match self {
-            Self::Broadcast => true,
-            Self::Direct(uuid) => address == *uuid,
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Envelope<T: Debug + Clone> {
+    source: PartyId,
+    destination: Address,
+    body: T,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Envelope {
-    pub sender: Address,
-    pub receiver: Address,
-    pub session_id: Uuid,
-}
-
-impl Envelope {
-    fn new(sender: Address, receiver: Address, session_id: Uuid) -> Self {
+impl<T: Debug + Clone> Envelope<T> {
+    pub fn new(source: PartyId, destination: Address, body: T) -> Self {
         Self {
-            sender,
-            receiver,
-            session_id,
+            source,
+            destination,
+            body,
         }
     }
 
-    fn new_broadcast(sender: Uuid) -> Self {
-        Self::new(Address::Direct(sender), Address::Broadcast, Uuid::new_v4())
+    pub fn source(&self) -> PartyId {
+        self.source.clone()
     }
 
-    fn respond_to(&self, sender: Uuid) -> Self {
-        Self::new(Address::Direct(sender), self.sender, self.session_id)
+    pub fn destination(&self) -> Address {
+        self.destination.clone()
+    }
+
+    pub fn body(&self) -> T {
+        self.body.clone()
     }
 
     pub fn is_directed_at(&self, address: Uuid) -> bool {
-        self.receiver.is_for(address)
+        let party_id = PartyId(address);
+        match &self.destination {
+            Address::Broadcast => true,
+            Address::Multiple(addresses) => addresses.contains(&party_id),
+            Address::Single(address) => *address == party_id,
+        }
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ping {
-    pub envelope: Envelope,
+    session_id: Uuid,
 }
 
 impl Ping {
-    pub fn new(sender: Uuid) -> Self {
-        Self {
-            envelope: Envelope::new_broadcast(sender),
-        }
+    pub fn new(session_id: Uuid) -> Self {
+        Self { session_id }
+    }
+
+    pub fn session_id(&self) -> Uuid {
+        self.session_id
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pong {
-    pub envelope: Envelope,
+    session_id: Uuid,
 }
 
 impl Pong {
-    pub fn new(ping: &Ping, sender: Uuid) -> Self {
-        Self {
-            envelope: ping.envelope.respond_to(sender),
-        }
+    pub fn new(session_id: Uuid) -> Self {
+        Self { session_id }
+    }
+
+    pub fn session_id(&self) -> Uuid {
+        self.session_id
     }
 }

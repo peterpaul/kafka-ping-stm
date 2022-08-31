@@ -1,4 +1,4 @@
-use kafka_ping_stm::{Address, Ping, Pong};
+use kafka_ping_stm::{Address, Envelope, PartyId, Ping, Pong};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
@@ -15,15 +15,15 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 enum InboundMessage {
-    PingReceived(Ping),
-    PongSent(Pong),
+    PingReceived(Envelope<Ping>),
+    PongSent(Envelope<Pong>),
 }
 
 #[derive(Debug)]
 struct Types;
 impl StateTypes for Types {
     type In = InboundMessage;
-    type Out = Pong;
+    type Out = Envelope<Pong>;
     type Err = String;
 }
 
@@ -31,7 +31,7 @@ impl StateTypes for Types {
 struct ListeningForPing {
     span: tracing::Span,
     my_address: Uuid,
-    received_ping: Option<Ping>,
+    received_ping: Option<Envelope<Ping>>,
 }
 
 impl ListeningForPing {
@@ -44,7 +44,7 @@ impl ListeningForPing {
     }
 
     #[tracing::instrument]
-    fn receive_ping(&mut self, ping: Ping) {
+    fn receive_ping(&mut self, ping: Envelope<Ping>) {
         log::info!("Received Ping: {:?}", ping);
         self.received_ping = Some(ping);
     }
@@ -87,12 +87,12 @@ impl State<Types> for ListeningForPing {
 struct SendingPong {
     span: tracing::Span,
     my_address: Uuid,
-    received_ping: Ping,
-    sent_pong: Option<Pong>,
+    received_ping: Envelope<Ping>,
+    sent_pong: Option<Envelope<Pong>>,
 }
 
 impl SendingPong {
-    fn new(span: tracing::Span, my_address: Uuid, received_ping: Ping) -> Self {
+    fn new(span: tracing::Span, my_address: Uuid, received_ping: Envelope<Ping>) -> Self {
         Self {
             span,
             my_address,
@@ -102,8 +102,12 @@ impl SendingPong {
     }
 
     #[tracing::instrument]
-    fn get_pong(&self) -> Pong {
-        let pong = Pong::new(&self.received_ping, self.my_address);
+    fn get_pong(&self) -> Envelope<Pong> {
+        let pong = Envelope::new(
+            PartyId(self.my_address),
+            Address::Single(self.received_ping.source()),
+            Pong::new(self.received_ping.body().session_id()),
+        );
         log::info!("Pong to send: {:?}", pong);
         pong
     }
@@ -115,7 +119,7 @@ impl State<Types> for SendingPong {
     }
 
     #[tracing::instrument(parent = &self.span)]
-    fn initialize(&self) -> Vec<Pong> {
+    fn initialize(&self) -> Vec<Envelope<Pong>> {
         vec![self.get_pong()]
     }
 
@@ -216,23 +220,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         for msg_result in consumer.poll()?.iter() {
             log::debug!("polled messages: {}", msg_result.messages().len());
             for msg in msg_result.messages() {
-                let ping: Ping =
+                let ping: Envelope<Ping> =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
                 log::debug!("Incoming ping message: {:?}", ping);
-                if ping.envelope.is_directed_at(address) {
+                if ping.is_directed_at(address) {
                     let span = tracing::info_span!("Pong span");
                     let _ = span.enter();
                     let state: BoxedState<Types> = Box::new(ListeningForPing::new(span, address));
 
                     let mut state_machine_runner = TimeBoundStateMachineRunner::new(
-                        format!(
-                            "Pong:{}",
-                            if let Address::Direct(sender) = ping.envelope.sender {
-                                sender
-                            } else {
-                                panic!("Sender must be a Direct address!")
-                            }
-                        ),
+                        format!("Pong:{}", ping.source().0),
                         state,
                         Duration::from_secs(5),
                     );
@@ -244,7 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                         .unwrap();
 
                     stm_map.insert(
-                        ping.envelope.session_id,
+                        ping.body().session_id(),
                         (state_machine_runner, outgoing, result),
                     );
                 } else {
