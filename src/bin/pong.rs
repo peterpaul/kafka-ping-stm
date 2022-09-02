@@ -1,4 +1,4 @@
-use kafka_ping_stm::{Address, Envelope, PartyId, Ping, Pong};
+use kafka_ping_stm::{Address, Envelope, PartyId, Ping, Pong, Spanned};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
@@ -23,7 +23,7 @@ enum InboundMessage {
 struct Types;
 impl StateTypes for Types {
     type In = InboundMessage;
-    type Out = Envelope<Pong>;
+    type Out = Spanned<Envelope<Pong>>;
     type Err = String;
 }
 
@@ -119,8 +119,8 @@ impl State<Types> for SendingPong {
     }
 
     #[tracing::instrument(parent = &self.span)]
-    fn initialize(&self) -> Vec<Envelope<Pong>> {
-        vec![self.get_pong()]
+    fn initialize(&self) -> Vec<<Types as StateTypes>::Out> {
+        vec![Spanned::new_cloned(&self.span, self.get_pong())]
     }
 
     #[tracing::instrument(parent = &self.span)]
@@ -174,6 +174,25 @@ impl State<Types> for SentPong {
     #[tracing::instrument(parent = &self.span)]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         Ok(Transition::Terminal)
+    }
+}
+
+fn kafka_send_messages(
+    producer: &mut Producer,
+    messages: Vec<<Types as StateTypes>::Out>,
+    stm: &mut TimeBoundStateMachineRunner<Types>,
+) {
+    for pong in messages.into_iter() {
+        let pong_span = tracing::info_span!(parent: pong.span(), "send_pong");
+        pong_span.in_scope(|| {
+            log::info!("Send Pong: {:?}", pong);
+            let pong_message = serde_json::to_string_pretty(&pong.inner()).unwrap();
+            let pong_record = Record::from_value("pong", pong_message);
+            // alternatively use producer.send_all for better performance
+            producer.send(&pong_record).unwrap();
+            stm.deliver(InboundMessage::PongSent(pong.unwrap()))
+                .unwrap();
+        })
     }
 }
 
@@ -257,14 +276,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
             for (session_id, (stm, outgoing, result)) in stm_map.iter_mut() {
                 tokio::select! {
                     Some(messages) = outgoing.recv() => {
-                        for pong in messages.into_iter() {
-                            log::info!("Send Pong: {:?}", pong);
-                            let pong_message = serde_json::to_string_pretty(&pong)?;
-                            let pong_record = Record::from_value("pong", pong_message);
-                            // alternatively use producer.send_all for better performance
-                            producer.send(&pong_record)?;
-                            stm.deliver(InboundMessage::PongSent(pong)).unwrap();
-                        }
+                        kafka_send_messages(&mut producer, messages, stm);
                     }
                     res = result => {
                         let res = res
