@@ -1,4 +1,7 @@
-use kafka_ping_stm::{Address, Envelope, PartyId, Ping, Pong, Spanned};
+use kafka_ping_stm::{
+    setup_tracing, Address, Envelope, PartyId, Ping, Pong, PropagationContext, Spanned,
+    SpannedMessage,
+};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
@@ -6,10 +9,9 @@ use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
 };
-use opentelemetry::global;
 use std::time::Duration;
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -117,8 +119,14 @@ fn kafka_send_pings(
     for ping in pings {
         let ping_span = tracing::info_span!(parent: ping.span(), "send_ping");
         ping_span.in_scope(|| {
-            log::info!("Send Ping: {:?}", ping);
-            let ping_message = serde_json::to_string_pretty(&ping.inner()).unwrap();
+            let context = PropagationContext::inject(&ping.span().context());
+
+            let ping_envelope: Envelope<Ping> = ping.unwrap();
+            // attach propagation context to outgoing message
+            let spanned_message: Envelope<SpannedMessage<Ping>> =
+                ping_envelope.map_body(|ping| SpannedMessage::new(context, ping));
+            log::info!("Send Ping: {:?}", spanned_message);
+            let ping_message = serde_json::to_string_pretty(&spanned_message).unwrap();
             let ping_record = Record::from_value("ping", ping_message);
             producer.send(&ping_record).unwrap();
         })
@@ -155,25 +163,7 @@ fn kafka_read_pongs(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    // Allows you to pass along context (i.e., trace IDs) across services
-    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-    // Sets up the machinery needed to export data to Jaeger
-    // There are other OTel crates that provide pipelines for the vendors
-    // mentioned earlier.
-    let tracer = opentelemetry_jaeger::new_pipeline()
-        .with_service_name("ping")
-        .install_simple()?;
-
-    // Create a tracing layer with the configured tracer
-    let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-    // The SubscriberExt and SubscriberInitExt traits are needed to extend the
-    // Registry to accept `opentelemetry (the OpenTelemetryLayer type).
-    tracing_subscriber::registry()
-        .with(opentelemetry)
-        // Continue logging to stdout
-        .with(fmt::Layer::default())
-        .try_init()?;
+    setup_tracing("ping")?;
 
     let address = Uuid::new_v4();
     log::info!("My address: {}", address);

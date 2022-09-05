@@ -1,4 +1,6 @@
-use kafka_ping_stm::{Address, Envelope, PartyId, Ping, Pong, Spanned};
+use kafka_ping_stm::{
+    setup_tracing, Address, Envelope, PartyId, Ping, Pong, Spanned, SpannedMessage,
+};
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
@@ -7,10 +9,10 @@ use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::TimeBoundStateMachineRunner,
 };
-use opentelemetry::global;
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::info_span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -198,25 +200,7 @@ fn kafka_send_messages(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    // Allows you to pass along context (i.e., trace IDs) across services
-    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-    // Sets up the machinery needed to export data to Jaeger
-    // There are other OTel crates that provide pipelines for the vendors
-    // mentioned earlier.
-    let tracer = opentelemetry_jaeger::new_pipeline()
-        .with_service_name("ping")
-        .install_simple()?;
-
-    // Create a tracing layer with the configured tracer
-    let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-    // The SubscriberExt and SubscriberInitExt traits are needed to extend the
-    // Registry to accept `opentelemetry (the OpenTelemetryLayer type).
-    tracing_subscriber::registry()
-        .with(opentelemetry)
-        // Continue logging to stdout
-        .with(fmt::Layer::default())
-        .try_init()?;
+    setup_tracing("pong")?;
 
     let address = Uuid::new_v4();
     log::info!("My address: {}", address);
@@ -239,11 +223,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         for msg_result in consumer.poll()?.iter() {
             log::debug!("polled messages: {}", msg_result.messages().len());
             for msg in msg_result.messages() {
-                let ping: Envelope<Ping> =
+                let ping: Envelope<SpannedMessage<Ping>> =
                     serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
                 log::debug!("Incoming ping message: {:?}", ping);
                 if ping.is_directed_at(address) {
-                    let span = tracing::info_span!("Pong span");
+                    let context = ping.body().context().extract();
+
+                    let span = info_span!("Pong span");
+                    span.set_parent(context);
+
                     let _ = span.enter();
                     let state: BoxedState<Types> = Box::new(ListeningForPing::new(span, address));
 
@@ -255,12 +243,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
                     let (outgoing, result) = state_machine_runner.run();
 
+                    let ping_envelope = ping.map_body(|ping| ping.unwrap());
                     state_machine_runner
-                        .deliver(InboundMessage::PingReceived(ping.clone()))
+                        .deliver(InboundMessage::PingReceived(ping_envelope.clone()))
                         .unwrap();
 
                     stm_map.insert(
-                        ping.body().session_id(),
+                        ping_envelope.body().session_id(),
                         (state_machine_runner, outgoing, result),
                     );
                 } else {
