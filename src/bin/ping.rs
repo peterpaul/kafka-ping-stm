@@ -39,12 +39,12 @@ impl State<Types> for SendingPing {
         "Sending Ping".to_owned()
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn initialize(&self) -> Vec<<Types as StateTypes>::Out> {
         vec![Spanned::new_cloned(&self.span, self.ping_to_send.clone())]
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn deliver(
         &mut self,
         message: <Types as StateTypes>::In,
@@ -52,7 +52,7 @@ impl State<Types> for SendingPing {
         DeliveryStatus::Unexpected(message)
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         Ok(Transition::Next(Box::new(ListeningForPong::new(
             self.span.clone(),
@@ -77,7 +77,7 @@ impl ListeningForPong {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self), fields(state = self.desc()))]
     fn receive_pong(&mut self, pong: <Types as StateTypes>::In) {
         log::info!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
@@ -89,7 +89,7 @@ impl State<Types> for ListeningForPong {
         "Waiting for Pong".to_owned()
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn deliver(
         &mut self,
         message: <Types as StateTypes>::In,
@@ -102,7 +102,7 @@ impl State<Types> for ListeningForPong {
         }
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.received_pong {
             Some(_pong) => Transition::Terminal,

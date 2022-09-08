@@ -45,7 +45,7 @@ impl ListeningForPing {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self), fields(state = self.desc()))]
     fn receive_ping(&mut self, ping: Envelope<Ping>) {
         log::info!("Received Ping: {:?}", ping);
         self.received_ping = Some(ping);
@@ -57,7 +57,7 @@ impl State<Types> for ListeningForPing {
         "Waiting for Ping".to_owned()
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn deliver(
         &mut self,
         message: InboundMessage,
@@ -71,7 +71,7 @@ impl State<Types> for ListeningForPing {
         }
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.received_ping {
             Some(ping) => Transition::Next(Box::new(SendingPong::new(
@@ -103,7 +103,7 @@ impl SendingPong {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self), fields(state = self.desc()))]
     fn get_pong(&self) -> Envelope<Pong> {
         let pong = Envelope::new(
             PartyId(self.my_address),
@@ -120,12 +120,12 @@ impl State<Types> for SendingPong {
         "Sending Pong".to_owned()
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn initialize(&self) -> Vec<<Types as StateTypes>::Out> {
         vec![Spanned::new_cloned(&self.span, self.get_pong())]
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn deliver(
         &mut self,
         message: InboundMessage,
@@ -139,7 +139,7 @@ impl State<Types> for SendingPong {
         }
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         let next = match &self.sent_pong {
             Some(_pong) => Transition::Next(Box::new(SentPong::new(self.span.clone()))),
@@ -165,7 +165,7 @@ impl State<Types> for SentPong {
         "Sent Pong".to_owned()
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn deliver(
         &mut self,
         message: <Types as StateTypes>::In,
@@ -173,7 +173,7 @@ impl State<Types> for SentPong {
         DeliveryStatus::Unexpected(message)
     }
 
-    #[tracing::instrument(parent = &self.span)]
+    #[tracing::instrument(parent = &self.span, skip(self), fields(state = self.desc()))]
     fn advance(&self) -> Result<Transition<Types>, <Types as StateTypes>::Err> {
         Ok(Transition::Terminal)
     }

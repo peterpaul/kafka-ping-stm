@@ -1,10 +1,11 @@
 use opentelemetry::{
     global,
     propagation::{Extractor, Injector},
+    sdk::trace::Tracer,
+    sdk::Resource,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
@@ -197,17 +198,39 @@ impl Extractor for PropagationContext {
     }
 }
 
-pub fn setup_tracing(
+pub fn get_tracer_for_jaeger(
     service_name: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    // Allows you to pass along context (i.e., trace IDs) across services
-    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+) -> Result<Tracer, Box<dyn std::error::Error + Send + Sync + 'static>> {
     // Sets up the machinery needed to export data to Jaeger
     // There are other OTel crates that provide pipelines for the vendors
     // mentioned earlier.
     let tracer = opentelemetry_jaeger::new_pipeline()
         .with_service_name(service_name)
+        // .install_batch(opentelemetry::runtime::Tokio)?;
         .install_simple()?;
+    Ok(tracer)
+}
+
+pub fn get_tracer_for_otlp() -> Result<Tracer, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    // use tonic as grpc layer here.
+    // If you want to use grpcio. enable `grpc-sys` feature and use with_grpcio function here.
+    let tracer = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
+        .with_trace_config(opentelemetry::sdk::trace::config().with_resource(Resource::default()))
+        .install_batch(opentelemetry::runtime::Tokio)?;
+    // .install_simple()?;
+    Ok(tracer)
+}
+
+pub fn setup_tracing(
+    service_name: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    // Allows you to pass along context (i.e., trace IDs) across services
+    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+
+    let tracer = get_tracer_for_jaeger(service_name)?;
+    // let tracer = get_tracer_for_otlp()?;
 
     // Create a tracing layer with the configured tracer
     let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
