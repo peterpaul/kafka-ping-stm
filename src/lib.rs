@@ -6,7 +6,7 @@ use opentelemetry::{
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,15 +157,11 @@ impl<T: Debug + Clone> SpannedMessage<T> {
 
 /// Serializable datastructure to hold the opentelemetry propagation context.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PropagationContext {
-    data: HashMap<String, String>,
-}
+pub struct PropagationContext(HashMap<String, String>);
 
 impl PropagationContext {
     fn empty() -> Self {
-        Self {
-            data: HashMap::new(),
-        }
+        Self(HashMap::new())
     }
 
     pub fn inject(context: &opentelemetry::Context) -> Self {
@@ -183,18 +179,18 @@ impl PropagationContext {
 
 impl Injector for PropagationContext {
     fn set(&mut self, key: &str, value: String) {
-        self.data.insert(key.to_owned(), value);
+        self.0.insert(key.to_owned(), value);
     }
 }
 
 impl Extractor for PropagationContext {
     fn get(&self, key: &str) -> Option<&str> {
         let key = key.to_owned();
-        self.data.get(&key).map(|v| v.as_ref())
+        self.0.get(&key).map(|v| v.as_ref())
     }
 
     fn keys(&self) -> Vec<&str> {
-        self.data.keys().map(|k| k.as_ref()).collect()
+        self.0.keys().map(|k| k.as_ref()).collect()
     }
 }
 
@@ -235,12 +231,17 @@ pub fn setup_tracing(
     // Create a tracing layer with the configured tracer
     let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
+    // Filter from the RUST_LOG environment variable
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .unwrap();
+
     // The SubscriberExt and SubscriberInitExt traits are needed to extend the
     // Registry to accept `opentelemetry (the OpenTelemetryLayer type).
     tracing_subscriber::registry()
         .with(opentelemetry)
-        // Continue logging to stdout
-        .with(fmt::Layer::default())
+        // Log to console filtered by level from RUST_LOG
+        .with(fmt::Layer::default().with_filter(filter_layer))
         .try_init()?;
 
     Ok(())

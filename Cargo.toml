@@ -14,7 +14,7 @@ tokio = { version = "1.20.1", features = [ "full", "tracing" ] }
 uuid = { version = "1", features = [ "v4", "fast-rng", "serde" ] }
 log = "0.4"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = [ "std", "env-filter" ] }
 tracing-opentelemetry = "0.17.2"
 opentelemetry = { version = "0.17.0", features = [ "rt-tokio" ] }
 opentelemetry-jaeger = { version = "0.16.0", features = [ "rt-tokio" ] }
