@@ -3,7 +3,7 @@
 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
-<!-- 2022-08-25 Thu 11:27 -->
+<!-- 2022-09-12 Mon 15:04 -->
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>&lrm;</title>
@@ -191,7 +191,7 @@
     { font-size: 10px; font-weight: bold; white-space: nowrap; }
   .org-info-js_search-highlight
     { background-color: #ffff00; color: #000000; font-weight: bold; }
-  .org-svg { }
+  .org-svg { width: 90%; }
 </style>
 </head>
 <body>
@@ -200,35 +200,39 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents" role="doc-toc">
 <ul>
-<li><a href="#org30b224c">1. Ping application</a></li>
-<li><a href="#orgab0c038">2. Setup development environment</a></li>
-<li><a href="#org49877a3">3. Ping Client</a>
+<li><a href="#orgb802ab9">1. Ping application</a></li>
+<li><a href="#orga23f271">2. Setup development environment</a></li>
+<li><a href="#org37031a8">3. Ping Client</a>
 <ul>
-<li><a href="#orgf5946e4">3.1. Ping state machine</a></li>
+<li><a href="#org3628f73">3.1. Ping state machine</a></li>
 </ul>
 </li>
-<li><a href="#org05e4e13">4. Ping Server</a>
+<li><a href="#org1a67195">4. Ping Server</a>
 <ul>
-<li><a href="#org43a1940">4.1. Pong state machine</a></li>
-<li><a href="#org8f80600">4.2. Making this a server</a></li>
+<li><a href="#org1908c75">4.1. Pong state machine</a></li>
 </ul>
 </li>
-<li><a href="#org7da2039">5. TODO</a></li>
+<li><a href="#orgd8adede">5. TODO</a></li>
 </ul>
 </div>
 </div>
-<div id="outline-container-org30b224c" class="outline-2">
-<h2 id="org30b224c"><span class="section-number-2">1.</span> Ping application</h2>
+<div id="outline-container-orgb802ab9" class="outline-2">
+<h2 id="orgb802ab9"><span class="section-number-2">1.</span> Ping application</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 This application is a POC, implementing the following behaviour using Apache Kafka as broker:
 </p>
 
 
-<div id="org419fdac" class="figure">
+<div id="orgf55ff09" class="figure">
 <p><img src="architecture.svg" alt="architecture.svg" class="org-svg" />
 </p>
 </div>
+
+<p>
+Logs and traces are collected using <a href="https://opentelemetry.io">OpenTelemetry</a>, and can be viewed using <a href="https://www.jaegertracing.io/">Jaeger</a>.
+</p>
+
 
 <p>
 Both the client and the server component are implemented in Rust using the <a href="https://github.com/vnermolaev/oblivious-state-machine">Oblivious state machine</a> and <a href="https://github.com/kafka-rust/kafka-rust">kafka-rust</a> libraries.
@@ -236,11 +240,11 @@ Both the client and the server component are implemented in Rust using the <a hr
 </div>
 </div>
 
-<div id="outline-container-orgab0c038" class="outline-2">
-<h2 id="orgab0c038"><span class="section-number-2">2.</span> Setup development environment</h2>
+<div id="outline-container-orga23f271" class="outline-2">
+<h2 id="orga23f271"><span class="section-number-2">2.</span> Setup development environment</h2>
 <div class="outline-text-2" id="text-2">
 <p>
-The development environment is setup using <code>docker-compose</code>, and consists of a Kafka server, including zookeeper, kafka-ui, schemaregistry and kafka-connect.
+The development environment is setup using <code>docker-compose</code>, and consists of a Kafka server, including zookeeper, kafka-ui and Jaeger.
 </p>
 
 <div class="org-src-container">
@@ -255,11 +259,15 @@ This will download and start all the necessary services. It will also create the
 <p>
 You can Contact Kafka UI at: <a href="http://localhost:8080/">http://localhost:8080/</a>
 </p>
+
+<p>
+You can view Jaeger at: <a href="http://localhost:16686/">http://localhost:16686/</a>
+</p>
 </div>
 </div>
 
-<div id="outline-container-org49877a3" class="outline-2">
-<h2 id="org49877a3"><span class="section-number-2">3.</span> Ping Client</h2>
+<div id="outline-container-org37031a8" class="outline-2">
+<h2 id="org37031a8"><span class="section-number-2">3.</span> Ping Client</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 The Ping client is implemented as a single-shot CLI application.
@@ -270,7 +278,7 @@ In order to run the Ping component with logging, set <code>RUST_LOG</code>, e.g.
 </p>
 
 <div class="org-src-container">
-<pre class="src src-bash"><span style="color: #D8DEE9;">RUST_LOG</span>=trace cargo run --bin ping
+<pre class="src src-bash"><span style="color: #D8DEE9;">JAEGER_TRACING</span>= <span style="color: #D8DEE9;">RUST_LOG</span>=trace cargo run --bin ping
 </pre>
 </div>
 
@@ -288,11 +296,11 @@ Or spawn many concurrent tasks:
 </div>
 </div>
 
-<div id="outline-container-orgf5946e4" class="outline-3">
-<h3 id="orgf5946e4"><span class="section-number-3">3.1.</span> Ping state machine</h3>
+<div id="outline-container-org3628f73" class="outline-3">
+<h3 id="org3628f73"><span class="section-number-3">3.1.</span> Ping state machine</h3>
 <div class="outline-text-3" id="text-3-1">
 
-<div id="orgee9931c" class="figure">
+<div id="orgecb8400" class="figure">
 <p><img src="ping.svg" alt="ping.svg" class="org-svg" />
 </p>
 </div>
@@ -300,8 +308,8 @@ Or spawn many concurrent tasks:
 </div>
 </div>
 
-<div id="outline-container-org05e4e13" class="outline-2">
-<h2 id="org05e4e13"><span class="section-number-2">4.</span> Ping Server</h2>
+<div id="outline-container-org1a67195" class="outline-2">
+<h2 id="org1a67195"><span class="section-number-2">4.</span> Ping Server</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 The Ping server is implemented using <code>tokio</code>. For each incoming message, a new task is spawned, that will execute the STM.
@@ -312,51 +320,25 @@ In order to run the Pong component with logging, set <code>RUST_LOG</code>, e.g.
 </p>
 
 <div class="org-src-container">
-<pre class="src src-bash"><span style="color: #D8DEE9;">RUST_LOG</span>=info cargo run --bin pong
+<pre class="src src-bash"><span style="color: #D8DEE9;">JAEGER_TRACING</span>= <span style="color: #D8DEE9;">RUST_LOG</span>=info cargo run --bin pong
 </pre>
 </div>
 </div>
 
-<div id="outline-container-org43a1940" class="outline-3">
-<h3 id="org43a1940"><span class="section-number-3">4.1.</span> Pong state machine</h3>
+<div id="outline-container-org1908c75" class="outline-3">
+<h3 id="org1908c75"><span class="section-number-3">4.1.</span> Pong state machine</h3>
 <div class="outline-text-3" id="text-4-1">
 
-<div id="orgfa21860" class="figure">
+<div id="orgccf663a" class="figure">
 <p><img src="pong.svg" alt="pong.svg" class="org-svg" />
 </p>
 </div>
 </div>
 </div>
-
-<div id="outline-container-org8f80600" class="outline-3">
-<h3 id="org8f80600"><span class="section-number-3">4.2.</span> Making this a server</h3>
-<div class="outline-text-3" id="text-4-2">
-<p>
-The Pong component is implemented as a server, for every incoming
-message on the <code>ping</code> queue, it parses the message and spanws a new
-tokio task that executes the oblivious state machine.
-</p>
-
-
-<div id="orgbfa05c3" class="figure">
-<p><img src="pong-server.svg" alt="pong-server.svg" class="org-svg" />
-</p>
 </div>
 
-<p>
-The disadvantage of this approach it that this will only work for STMs
-that depend on a single kafka message. In order to make this work for
-a STM that depends on multiple kafka messages to advance the STM, we
-should have a correlation id in the messages, and open a channel for
-each stm. Then newer messages can be sent to the correct channel based
-on the correlation id.
-</p>
-</div>
-</div>
-</div>
-
-<div id="outline-container-org7da2039" class="outline-2">
-<h2 id="org7da2039"><span class="section-number-2">5.</span> TODO</h2>
+<div id="outline-container-orgd8adede" class="outline-2">
+<h2 id="orgd8adede"><span class="section-number-2">5.</span> TODO</h2>
 <div class="outline-text-2" id="text-5">
 <ul class="org-ul">
 <li>Use <code>apache-avro = { version = "X.Y.Z", features = ["derive"] }</code> instead of JSON, and publish schema to schemaregistry.</li>
@@ -367,7 +349,7 @@ on the correlation id.
 </div>
 <div id="postamble" class="status">
 <p class="author">Author: Peterpaul Klein Haneveld</p>
-<p class="date">Created: 2022-08-25 Thu 11:27</p>
+<p class="date">Created: 2022-09-12 Mon 15:04</p>
 <p class="validation"><a href="https://validator.w3.org/check?uri=referer">Validate</a></p>
 </div>
 </body>

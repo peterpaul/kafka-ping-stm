@@ -194,7 +194,7 @@ impl Extractor for PropagationContext {
     }
 }
 
-pub fn get_tracer_for_jaeger(
+fn get_tracer_for_jaeger(
     service_name: &str,
 ) -> Result<Tracer, Box<dyn std::error::Error + Send + Sync + 'static>> {
     // Sets up the machinery needed to export data to Jaeger
@@ -207,7 +207,7 @@ pub fn get_tracer_for_jaeger(
     Ok(tracer)
 }
 
-pub fn get_tracer_for_otlp() -> Result<Tracer, Box<dyn std::error::Error + Send + Sync + 'static>> {
+fn _get_tracer_for_otlp() -> Result<Tracer, Box<dyn std::error::Error + Send + Sync + 'static>> {
     // use tonic as grpc layer here.
     // If you want to use grpcio. enable `grpc-sys` feature and use with_grpcio function here.
     let tracer = opentelemetry_otlp::new_pipeline()
@@ -219,7 +219,41 @@ pub fn get_tracer_for_otlp() -> Result<Tracer, Box<dyn std::error::Error + Send 
     Ok(tracer)
 }
 
-pub fn setup_tracing(
+pub fn setup_tracing_from_environment(
+    service_name: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    if std::env::var("JAEGER_TRACING").is_ok() {
+        println!("Initializing tracing with jaeger/opentelemetry");
+        setup_tracing_with_jaeger(service_name)
+    } else {
+        println!("Initializing tracing to console only");
+        println!("  - set environment variable 'JAEGER_TRACING' to enable jaeger");
+        setup_tracing_without_jaeger()
+    }
+}
+
+pub fn setup_tracing_without_jaeger(
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    // Allows you to pass along context (i.e., trace IDs) across services
+    global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+
+    // Filter from the RUST_LOG environment variable
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .unwrap();
+
+    // The SubscriberExt and SubscriberInitExt traits are needed to extend the
+    // Registry to accept `opentelemetry (the OpenTelemetryLayer type).
+    tracing_subscriber::registry()
+        // Log to console filtered by level from RUST_LOG
+        .with(fmt::Layer::default())
+        .with(filter_layer)
+        .try_init()?;
+
+    Ok(())
+}
+
+pub fn setup_tracing_with_jaeger(
     service_name: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     // Allows you to pass along context (i.e., trace IDs) across services

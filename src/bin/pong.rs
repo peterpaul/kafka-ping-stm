@@ -1,5 +1,5 @@
 use kafka_ping_stm::{
-    setup_tracing, Address, Envelope, PartyId, Ping, Pong, Spanned, SpannedMessage,
+    setup_tracing_from_environment, Address, Envelope, PartyId, Ping, Pong, Spanned, SpannedMessage,
 };
 
 use kafka::consumer::{Consumer, FetchOffset};
@@ -200,7 +200,7 @@ fn kafka_send_messages(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    setup_tracing("pong")?;
+    setup_tracing_from_environment("pong")?;
 
     let address = Uuid::new_v4();
     log::info!("My address: {}", address);

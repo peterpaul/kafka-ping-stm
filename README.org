@@ -2,37 +2,46 @@
 
 This application is a POC, implementing the following behaviour using Apache Kafka as broker:
 
-#+begin_src plantuml :file architecture.svg
+#+begin_src plantuml :file architecture.svg :exports results
   @startuml
   left to right direction
   title Ping Architecture
 
   !include <cloudinsight/kafka>
-  queue "Apache Kafka" <<$kafka>> {
-      queue ping
-      queue pong
-      ping -[hidden]l-> pong
+  !include <logos/jaeger>
+  together {
+      queue "Apache Kafka" as kafka <<$kafka>> {
+          queue ping
+          queue pong
+          ping -[hidden]l-> pong
+      }
+
+      component "**Jaeger**" as jaeger <<$jaeger>>
   }
 
-  component "Ping Client" {
+  component "Ping Client" as ping_client {
       together {
-	  component "producer" as ping_producer
-	  component "consumer" as ping_consumer
+          component "producer" as ping_producer
+          component "consumer" as ping_consumer
       }
       component "stm" as ping_stm
       ping_stm --> ping_producer: 1
       ping_producer --> ping_stm: 2
       ping_stm --> ping_consumer: 3
   }
-  component "Ping Server" {
+
+  component "Ping Server" as ping_server {
       together {
-	  component "consumer" as pong_consumer
-	  component "producer" as pong_producer
+          component "consumer" as pong_consumer
+          component "producer" as pong_producer
       }
       component "stm" as pong_stm
       pong_consumer ---> pong_stm: 1
       pong_stm --> pong_producer: 2
   }
+
+  ping_client -> jaeger: Tracing
+  ping_server -> jaeger: Tracing
 
   ping_producer --> ping: Ping
   ping --> pong_consumer: Ping
@@ -44,11 +53,14 @@ This application is a POC, implementing the following behaviour using Apache Kaf
 #+RESULTS:
 [[file:architecture.svg]]
 
+Logs and traces are collected using [[https://opentelemetry.io][OpenTelemetry]], and can be viewed using [[https://www.jaegertracing.io/][Jaeger]].
+
+
 Both the client and the server component are implemented in Rust using the [[https://github.com/vnermolaev/oblivious-state-machine][Oblivious state machine]] and [[https://github.com/kafka-rust/kafka-rust][kafka-rust]] libraries.
 
 * Setup development environment
 
-The development environment is setup using ~docker-compose~, and consists of a Kafka server, including zookeeper, kafka-ui, schemaregistry and kafka-connect.
+The development environment is setup using ~docker-compose~, and consists of a Kafka server, including zookeeper, kafka-ui and Jaeger.
 
 #+begin_src bash
   docker-compose up
@@ -56,7 +68,9 @@ The development environment is setup using ~docker-compose~, and consists of a K
 
 This will download and start all the necessary services. It will also create the topics that needed for this POC.
 
-You can Contact Kafka UI at: http://localhost:8080/
+You can Contact Kafka UI at: [[http://localhost:8080/]]
+
+You can view Jaeger at: [[http://localhost:16686/]]
 
 * Ping Client
 
@@ -65,7 +79,7 @@ The Ping client is implemented as a single-shot CLI application.
 In order to run the Ping component with logging, set ~RUST_LOG~, e.g.:
 
 #+begin_src bash
-  RUST_LOG=trace cargo run --bin ping
+  JAEGER_TRACING= RUST_LOG=trace cargo run --bin ping
 #+end_src
 
 Or spawn many concurrent tasks:
@@ -80,10 +94,20 @@ Or spawn many concurrent tasks:
 
 ** Ping state machine
 
-#+begin_src plantuml :file ping.svg
-  [*] -> SendingPing: session_id
-  SendingPing -> ListeningForPong
-  ListeningForPong -> [*]: Pong(session_id)
+#+begin_src plantuml :file ping.svg :exports results
+  state StateMachineRunner {
+          state start <<entryPoint>>
+          state incoming <<entryPoint>>
+          start --> SendingPing: session_id
+          SendingPing -[dotted]-> outgoing <<exitPoint>>: Ping(session_id)
+          SendingPing -> ListeningForPong
+          incoming -[dotted]-> ListeningForPong: Pong(session_id)
+          ListeningForPong -> terminal <<exitPoint>>: Pong(session_id)
+  }
+  [*] --> start: session_id
+  terminal --> [*]: Pong(session_id)
+  consumer -[dotted]-> incoming: Pong(session_id)
+  outgoing -[dotted]-> producer: Ping(session_id)
 #+end_src
 
 #+RESULTS:
@@ -96,40 +120,39 @@ The Ping server is implemented using ~tokio~. For each incoming message, a new t
 In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
 
 #+begin_src bash
-  RUST_LOG=info cargo run --bin pong
+  JAEGER_TRACING= RUST_LOG=info cargo run --bin pong
 #+end_src
 
 ** Pong state machine
 
-#+begin_src plantuml :file pong.svg
-  [*] -> ListeningForPing
-  ListeningForPing -> SendingPong: Ping
-  SendingPong -> SentPong: PongSent
-  SentPong -> [*]
+#+begin_src plantuml :file pong.svg :exports results
+  state StateMachineRunner {
+          state start <<entryPoint>>
+          state incoming <<entryPoint>>
+          start --> ListeningForPing
+          incoming -[dotted]-> ListeningForPing: Ping
+          incoming -[dotted]-> SentPong: PongSent
+          ListeningForPing -> SendingPong: Ping
+          SendingPong -[dotted]-> outgoing <<exitPoint>>: Pong
+          SendingPong -> SentPong: Pong
+          SentPong -> terminal <<exitPoint>>: Pong
+  }
+  [*] --> start
+  terminal --> [*]: Pong
+  consumer -[dotted]-> incoming: Ping
+  outgoing -[dotted]-> producer: Pong
+  note right of producer
+          emit //PongSent//
+          to **incoming**
+  end note
+  note right of incoming
+          receive //PongSent//
+          from **producer**
+  end note
 #+end_src
 
 #+RESULTS:
 [[file:pong.svg]]
-
-** Making this a server
-
-The Pong component is implemented as a server, for every incoming
-message on the ~ping~ queue, it parses the message and spanws a new
-tokio task that executes the oblivious state machine.
-
-#+begin_src plantuml :file pong-server.svg
-  [kafka consumer] -> [pong stm]: spawn tokio task
-#+end_src
-
-#+RESULTS:
-[[file:pong-server.svg]]
-
-The disadvantage of this approach it that this will only work for STMs
-that depend on a single kafka message. In order to make this work for
-a STM that depends on multiple kafka messages to advance the STM, we
-should have a correlation id in the messages, and open a channel for
-each stm. Then newer messages can be sent to the correct channel based
-on the correlation id.
 
 * TODO
 
