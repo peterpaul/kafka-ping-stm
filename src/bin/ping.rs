@@ -1,6 +1,6 @@
 use kafka_ping_stm::{
-    setup_tracing_from_environment, Address, Envelope, PartyId, Ping, Pong, PropagationContext,
-    Spanned, SpannedMessage,
+    setup_tracing_from_environment, spawn_kafka_consumer_task, Address, Envelope, PartyId, Ping,
+    Pong, PropagationContext, Spanned, SpannedMessage,
 };
 
 use kafka::consumer::{Consumer, FetchOffset};
@@ -9,8 +9,8 @@ use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
 };
-use std::time::Duration;
-use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
+use std::{fmt::Debug, time::Duration};
+use tokio::sync::{mpsc, oneshot};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -79,7 +79,7 @@ impl ListeningForPong {
 
     #[tracing::instrument(skip(self), fields(state = self.desc()))]
     fn receive_pong(&mut self, pong: <Types as StateTypes>::In) {
-        log::info!("Received Pong: {:?}", pong);
+        log::debug!("Received Pong: {:?}", pong);
         self.received_pong = Some(pong);
     }
 }
@@ -125,38 +125,11 @@ fn kafka_send_pings(
             // attach propagation context to outgoing message
             let spanned_message: Envelope<SpannedMessage<Ping>> =
                 ping_envelope.map_body(|ping| SpannedMessage::new(context, ping));
-            log::info!("Send Ping: {:?}", spanned_message);
+            log::debug!("Send Ping: {:?}", spanned_message);
             let ping_message = serde_json::to_string_pretty(&spanned_message).unwrap();
             let ping_record = Record::from_value("ping", ping_message);
             producer.send(&ping_record).unwrap();
         })
-    }
-    Ok(())
-}
-
-fn kafka_read_pongs(
-    mut consumer: Consumer,
-    address: Uuid,
-    pong_tx: UnboundedSender<<Types as StateTypes>::In>,
-    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    while shutdown_rx.try_recv().is_err() {
-        log::debug!("polling kafka for messages");
-        for msg_result in consumer.poll()?.iter() {
-            log::debug!("polled messages: {}", msg_result.messages().len());
-            for msg in msg_result.messages() {
-                let pong: <Types as StateTypes>::In = serde_json::from_slice(msg.value)?;
-                log::debug!("Incoming pong message: {:?}", pong);
-                if pong.is_directed_at(address) {
-                    pong_tx.send(pong)?;
-                } else {
-                    log::debug!("Dropped: {:?}", pong);
-                }
-            }
-            // This could be problematic, if the ping was directed at a specific node and there are multiple pong nodes running.
-            consumer.consume_messageset(msg_result)?;
-        }
-        consumer.commit_consumed()?;
     }
     Ok(())
 }
@@ -199,34 +172,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
     let (mut outgoing, mut result) = state_machine_runner.run();
 
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    let (pong_tx, mut pong_rx) = mpsc::unbounded_channel::<<Types as StateTypes>::In>();
-
-    let kafka_receiver_task = tokio::task::spawn_blocking(move || {
-        kafka_read_pongs(consumer, address, pong_tx, shutdown_rx).unwrap();
-    });
+    let (kafka_receiver_task, mut pong_rx, shutdown_tx): (
+        tokio::task::JoinHandle<()>,
+        mpsc::UnboundedReceiver<Envelope<Pong>>,
+        oneshot::Sender<()>,
+    ) = spawn_kafka_consumer_task(consumer);
 
     let res: TimeBoundStateMachineResult<Types> = loop {
-        log::debug!("polling stm for messages");
+        log::trace!("polling stm for messages");
         tokio::select! {
             Some(pong) = pong_rx.recv() => {
-                state_machine_runner.deliver(pong).unwrap();
+                log::trace!("Incoming pong message: {:?}", pong);
+                if pong.is_directed_at(address) {
+                    state_machine_runner.deliver(pong).unwrap();
+                } else {
+                    log::trace!("Dropped: {:?}", pong);
+                }
             }
             Some(messages) = outgoing.recv() => {
-                log::debug!("messages to send: {}", messages.len());
+                log::trace!("messages to send: {}", messages.len());
                 kafka_send_pings(&mut producer, messages)?;
             }
             res = &mut result => {
-                log::debug!("State machine yielded result");
+                log::trace!("State machine yielded result");
                 break res.expect("Result from State Machine must be communicated");
             }
         }
-        log::debug!("consumer loop end.");
+        log::trace!("consumer loop end.");
     };
 
     let terminal_state = res.unwrap_or_else(|_| panic!("State machine did not complete in time"));
 
-    log::info!("State machine ended at: <{}>", terminal_state.desc());
+    log::debug!("State machine ended at: <{}>", terminal_state.desc());
 
     shutdown_tx.send(()).unwrap();
     kafka_receiver_task.await?;

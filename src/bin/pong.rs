@@ -1,16 +1,19 @@
 use kafka_ping_stm::{
-    setup_tracing_from_environment, Address, Envelope, PartyId, Ping, Pong, Spanned, SpannedMessage,
+    setup_tracing_from_environment, spawn_kafka_consumer_task, Address, Envelope, PartyId, Ping,
+    Pong, Spanned, SpannedMessage,
 };
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
 use oblivious_state_machine::state::BoxedState;
+use oblivious_state_machine::state_machine::TimeBoundStateMachineResult;
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::TimeBoundStateMachineRunner,
 };
 use std::collections::HashMap;
 use std::time::Duration;
+use tokio::sync::{mpsc, oneshot};
 use tracing::info_span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
@@ -28,6 +31,15 @@ impl StateTypes for Types {
     type Out = Spanned<Envelope<Pong>>;
     type Err = String;
 }
+
+type StateMachineMap = HashMap<
+    Uuid,
+    (
+        TimeBoundStateMachineRunner<Types>,
+        mpsc::UnboundedReceiver<Vec<Spanned<Envelope<Pong>>>>,
+        oneshot::Receiver<TimeBoundStateMachineResult<Types>>,
+    ),
+>;
 
 #[derive(Debug)]
 struct ListeningForPing {
@@ -47,7 +59,7 @@ impl ListeningForPing {
 
     #[tracing::instrument(skip(self), fields(state = self.desc()))]
     fn receive_ping(&mut self, ping: Envelope<Ping>) {
-        log::info!("Received Ping: {:?}", ping);
+        log::debug!("Received Ping: {:?}", ping);
         self.received_ping = Some(ping);
     }
 }
@@ -110,7 +122,7 @@ impl SendingPong {
             Address::Single(self.received_ping.source()),
             Pong::new(self.received_ping.body().session_id()),
         );
-        log::info!("Pong to send: {:?}", pong);
+        log::debug!("Pong to send: {:?}", pong);
         pong
     }
 }
@@ -184,10 +196,10 @@ fn kafka_send_messages(
     messages: Vec<<Types as StateTypes>::Out>,
     stm: &mut TimeBoundStateMachineRunner<Types>,
 ) {
-    for pong in messages.into_iter() {
+    for pong in messages {
         let pong_span = tracing::info_span!(parent: pong.span(), "send_pong");
         pong_span.in_scope(|| {
-            log::info!("Send Pong: {:?}", pong);
+            log::debug!("Send Pong: {:?}", pong);
             let pong_message = serde_json::to_string_pretty(&pong.inner()).unwrap();
             let pong_record = Record::from_value("pong", pong_message);
             // alternatively use producer.send_all for better performance
@@ -198,6 +210,43 @@ fn kafka_send_messages(
     }
 }
 
+fn receive_ping(
+    address: Uuid,
+    ping: Envelope<SpannedMessage<Ping>>,
+    stm_map: &mut StateMachineMap,
+) {
+    log::trace!("Incoming ping message: {:?}", ping);
+    if ping.is_directed_at(address) {
+        let context = ping.body().context().extract();
+
+        let span = info_span!("Pong span");
+        span.set_parent(context);
+
+        let _ = span.enter();
+        let state: BoxedState<Types> = Box::new(ListeningForPing::new(span, address));
+
+        let mut state_machine_runner = TimeBoundStateMachineRunner::new(
+            format!("Pong:{}", ping.source().0),
+            state,
+            Duration::from_secs(5),
+        );
+
+        let (outgoing, result) = state_machine_runner.run();
+
+        let ping_envelope = ping.map_body(|ping| ping.unwrap());
+        state_machine_runner
+            .deliver(InboundMessage::PingReceived(ping_envelope.clone()))
+            .unwrap();
+
+        stm_map.insert(
+            ping_envelope.body().session_id(),
+            (state_machine_runner, outgoing, result),
+        );
+    } else {
+        log::debug!("Dropped: {:?}", ping);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     setup_tracing_from_environment("pong")?;
@@ -205,7 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     let address = Uuid::new_v4();
     log::info!("My address: {}", address);
 
-    let mut consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
+    let consumer = Consumer::from_hosts(vec!["localhost:9092".to_owned()])
         .with_topic("ping".to_owned())
         .with_fallback_offset(FetchOffset::Earliest)
         .with_group("my_consumer_group".to_owned())
@@ -216,50 +265,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         .with_required_acks(RequiredAcks::One)
         .create()?;
 
-    let mut stm_map = HashMap::new();
+    let mut stm_map: StateMachineMap = HashMap::new();
+
+    let (_kafka_consumer_task, mut ping_rx, _shutdown_tx): (
+        tokio::task::JoinHandle<()>,
+        mpsc::UnboundedReceiver<Envelope<SpannedMessage<Ping>>>,
+        oneshot::Sender<()>,
+    ) = spawn_kafka_consumer_task(consumer);
 
     loop {
-        log::debug!("in consumer loop");
-        for msg_result in consumer.poll()?.iter() {
-            log::debug!("polled messages: {}", msg_result.messages().len());
-            for msg in msg_result.messages() {
-                let ping: Envelope<SpannedMessage<Ping>> =
-                    serde_json::from_slice(msg.value).expect("failed to deser JSON to Ping");
-                log::debug!("Incoming ping message: {:?}", ping);
-                if ping.is_directed_at(address) {
-                    let context = ping.body().context().extract();
-
-                    let span = info_span!("Pong span");
-                    span.set_parent(context);
-
-                    let _ = span.enter();
-                    let state: BoxedState<Types> = Box::new(ListeningForPing::new(span, address));
-
-                    let mut state_machine_runner = TimeBoundStateMachineRunner::new(
-                        format!("Pong:{}", ping.source().0),
-                        state,
-                        Duration::from_secs(5),
-                    );
-
-                    let (outgoing, result) = state_machine_runner.run();
-
-                    let ping_envelope = ping.map_body(|ping| ping.unwrap());
-                    state_machine_runner
-                        .deliver(InboundMessage::PingReceived(ping_envelope.clone()))
-                        .unwrap();
-
-                    stm_map.insert(
-                        ping_envelope.body().session_id(),
-                        (state_machine_runner, outgoing, result),
-                    );
-                } else {
-                    log::debug!("Dropped: {:?}", ping);
-                }
-            }
-            consumer.consume_messageset(msg_result)?;
+        log::trace!("Handle incoming messages");
+        while let Ok(ping) = ping_rx.try_recv() {
+            receive_ping(address, ping, &mut stm_map);
         }
-        consumer.commit_consumed()?;
 
+        log::trace!("Try to advance all state machines");
+        // NOTE This may cause a STM that cannot progress to block all other STMs
         let ids_to_remove = {
             let mut ids_to_remove = Vec::new();
             for (session_id, (stm, outgoing, result)) in stm_map.iter_mut() {
@@ -271,16 +292,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
                         let res = res
                             .expect("Result from State Machine must be communicated")
                             .unwrap_or_else(|_| panic!("State machine did not complete in time"));
-                        log::info!("State machine ended at: <{}>", res.desc());
+                        log::debug!("State machine ended at: <{}>", res.desc());
                         ids_to_remove.push(*session_id);
                     }
-                }
+                };
             }
             ids_to_remove
         };
 
-        for id in ids_to_remove.iter() {
-            stm_map.remove(id);
+        for id in ids_to_remove {
+            stm_map.remove(&id);
         }
     }
 }

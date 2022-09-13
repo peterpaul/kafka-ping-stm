@@ -1,11 +1,13 @@
+use kafka::consumer::Consumer;
 use opentelemetry::{
     global,
     propagation::{Extractor, Injector},
     sdk::trace::Tracer,
     sdk::Resource,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
+use tokio::sync::{mpsc, oneshot};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 use uuid::Uuid;
 
@@ -279,4 +281,47 @@ pub fn setup_tracing_with_jaeger(
         .try_init()?;
 
     Ok(())
+}
+
+fn poll_kafka<T>(
+    mut consumer: Consumer,
+    message_tx: mpsc::UnboundedSender<T>,
+    mut shutdown_rx: oneshot::Receiver<()>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+where
+    T: DeserializeOwned + Send + Sync + Debug + 'static,
+{
+    while shutdown_rx.try_recv().is_err() {
+        log::trace!("polling kafka for messages");
+        for msg_result in consumer.poll()?.iter() {
+            log::trace!("polled messages: {}", msg_result.messages().len());
+            for msg in msg_result.messages() {
+                let message: T = serde_json::from_slice(msg.value)?;
+                message_tx.send(message)?;
+            }
+            consumer.consume_messageset(msg_result)?;
+        }
+        consumer.commit_consumed()?;
+    }
+    Ok(())
+}
+
+pub fn spawn_kafka_consumer_task<T>(
+    consumer: Consumer,
+) -> (
+    tokio::task::JoinHandle<()>,
+    mpsc::UnboundedReceiver<T>,
+    oneshot::Sender<()>,
+)
+where
+    T: DeserializeOwned + Debug + Send + Sync + 'static,
+{
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let (message_tx, message_rx) = mpsc::unbounded_channel::<T>();
+
+    let kafka_consumer_task = tokio::task::spawn_blocking(move || {
+        poll_kafka(consumer, message_tx, shutdown_rx).unwrap();
+    });
+
+    (kafka_consumer_task, message_rx, shutdown_tx)
 }
