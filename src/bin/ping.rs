@@ -5,6 +5,7 @@ use kafka_ping_stm::{
 
 use kafka::consumer::{Consumer, FetchOffset};
 use kafka::producer::{Producer, Record, RequiredAcks};
+use oblivious_state_machine::state::BoxedState;
 use oblivious_state_machine::{
     state::{DeliveryStatus, State, StateTypes, Transition},
     state_machine::{TimeBoundStateMachineResult, TimeBoundStateMachineRunner},
@@ -155,7 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     let ping_span = tracing::info_span!("ping span");
     let _ = ping_span.enter();
 
-    let state: Box<dyn State<Types> + Send> = Box::new(SendingPing::new(
+    let state: BoxedState<Types> = Box::new(SendingPing::new(
         ping_span,
         Envelope::new(
             PartyId(address),

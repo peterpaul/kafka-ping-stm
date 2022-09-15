@@ -131,11 +131,10 @@ In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
           state incoming <<entryPoint>>
           start --> ListeningForPing
           incoming -[dotted]-> ListeningForPing: Ping
-          incoming -[dotted]-> SentPong: PongSent
+          incoming -[dotted]-> SendingPong: PongSent
           ListeningForPing -> SendingPong: Ping
           SendingPong -[dotted]-> outgoing <<exitPoint>>: Pong
-          SendingPong -> SentPong: Pong
-          SentPong -> terminal <<exitPoint>>: Pong
+          SendingPong --> terminal <<exitPoint>>: Pong
   }
   [*] --> start
   terminal --> [*]: Pong
@@ -153,6 +152,9 @@ In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
 
 #+RESULTS:
 [[file:pong.svg]]
+
+After sending the ~Pong~ message, a ~PongSent~ event is emitted, this will ensure that the state machine is active until all messages are processed.
+Without this in place, there could be a race condition, since tokio channels are used to communicate outgoing messages, there could be a race condition where the outgoing channel is closed before the producer handled the message.
 
 * TODO
 

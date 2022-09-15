@@ -3,7 +3,7 @@
 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
-<!-- 2022-09-12 Mon 15:04 -->
+<!-- 2022-09-15 Thu 10:43 -->
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>&lrm;</title>
@@ -200,31 +200,31 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents" role="doc-toc">
 <ul>
-<li><a href="#orgb802ab9">1. Ping application</a></li>
-<li><a href="#orga23f271">2. Setup development environment</a></li>
-<li><a href="#org37031a8">3. Ping Client</a>
+<li><a href="#orgfb6fd64">1. Ping application</a></li>
+<li><a href="#org6200f30">2. Setup development environment</a></li>
+<li><a href="#org3ed302a">3. Ping Client</a>
 <ul>
-<li><a href="#org3628f73">3.1. Ping state machine</a></li>
+<li><a href="#org29741b6">3.1. Ping state machine</a></li>
 </ul>
 </li>
-<li><a href="#org1a67195">4. Ping Server</a>
+<li><a href="#org02a889c">4. Ping Server</a>
 <ul>
-<li><a href="#org1908c75">4.1. Pong state machine</a></li>
+<li><a href="#orge1b2764">4.1. Pong state machine</a></li>
 </ul>
 </li>
-<li><a href="#orgd8adede">5. TODO</a></li>
+<li><a href="#orgf0bc706">5. TODO</a></li>
 </ul>
 </div>
 </div>
-<div id="outline-container-orgb802ab9" class="outline-2">
-<h2 id="orgb802ab9"><span class="section-number-2">1.</span> Ping application</h2>
+<div id="outline-container-orgfb6fd64" class="outline-2">
+<h2 id="orgfb6fd64"><span class="section-number-2">1.</span> Ping application</h2>
 <div class="outline-text-2" id="text-1">
 <p>
 This application is a POC, implementing the following behaviour using Apache Kafka as broker:
 </p>
 
 
-<div id="orgf55ff09" class="figure">
+<div id="orga367f5b" class="figure">
 <p><img src="architecture.svg" alt="architecture.svg" class="org-svg" />
 </p>
 </div>
@@ -240,8 +240,8 @@ Both the client and the server component are implemented in Rust using the <a hr
 </div>
 </div>
 
-<div id="outline-container-orga23f271" class="outline-2">
-<h2 id="orga23f271"><span class="section-number-2">2.</span> Setup development environment</h2>
+<div id="outline-container-org6200f30" class="outline-2">
+<h2 id="org6200f30"><span class="section-number-2">2.</span> Setup development environment</h2>
 <div class="outline-text-2" id="text-2">
 <p>
 The development environment is setup using <code>docker-compose</code>, and consists of a Kafka server, including zookeeper, kafka-ui and Jaeger.
@@ -266,8 +266,8 @@ You can view Jaeger at: <a href="http://localhost:16686/">http://localhost:16686
 </div>
 </div>
 
-<div id="outline-container-org37031a8" class="outline-2">
-<h2 id="org37031a8"><span class="section-number-2">3.</span> Ping Client</h2>
+<div id="outline-container-org3ed302a" class="outline-2">
+<h2 id="org3ed302a"><span class="section-number-2">3.</span> Ping Client</h2>
 <div class="outline-text-2" id="text-3">
 <p>
 The Ping client is implemented as a single-shot CLI application.
@@ -296,11 +296,11 @@ Or spawn many concurrent tasks:
 </div>
 </div>
 
-<div id="outline-container-org3628f73" class="outline-3">
-<h3 id="org3628f73"><span class="section-number-3">3.1.</span> Ping state machine</h3>
+<div id="outline-container-org29741b6" class="outline-3">
+<h3 id="org29741b6"><span class="section-number-3">3.1.</span> Ping state machine</h3>
 <div class="outline-text-3" id="text-3-1">
 
-<div id="orgecb8400" class="figure">
+<div id="orgd54a51a" class="figure">
 <p><img src="ping.svg" alt="ping.svg" class="org-svg" />
 </p>
 </div>
@@ -308,8 +308,8 @@ Or spawn many concurrent tasks:
 </div>
 </div>
 
-<div id="outline-container-org1a67195" class="outline-2">
-<h2 id="org1a67195"><span class="section-number-2">4.</span> Ping Server</h2>
+<div id="outline-container-org02a889c" class="outline-2">
+<h2 id="org02a889c"><span class="section-number-2">4.</span> Ping Server</h2>
 <div class="outline-text-2" id="text-4">
 <p>
 The Ping server is implemented using <code>tokio</code>. For each incoming message, a new task is spawned, that will execute the STM.
@@ -325,20 +325,25 @@ In order to run the Pong component with logging, set <code>RUST_LOG</code>, e.g.
 </div>
 </div>
 
-<div id="outline-container-org1908c75" class="outline-3">
-<h3 id="org1908c75"><span class="section-number-3">4.1.</span> Pong state machine</h3>
+<div id="outline-container-orge1b2764" class="outline-3">
+<h3 id="orge1b2764"><span class="section-number-3">4.1.</span> Pong state machine</h3>
 <div class="outline-text-3" id="text-4-1">
 
-<div id="orgccf663a" class="figure">
+<div id="org119a638" class="figure">
 <p><img src="pong.svg" alt="pong.svg" class="org-svg" />
+</p>
+</div>
+
+<p>
+After sending the <code>Pong</code> message, a <code>PongSent</code> event is emitted, this will ensure that the state machine is active until all messages are processed.
+Without this in place, there could be a race condition, since tokio channels are used to communicate outgoing messages, there could be a race condition where the outgoing channel is closed before the producer handled the message.
 </p>
 </div>
 </div>
 </div>
-</div>
 
-<div id="outline-container-orgd8adede" class="outline-2">
-<h2 id="orgd8adede"><span class="section-number-2">5.</span> TODO</h2>
+<div id="outline-container-orgf0bc706" class="outline-2">
+<h2 id="orgf0bc706"><span class="section-number-2">5.</span> TODO</h2>
 <div class="outline-text-2" id="text-5">
 <ul class="org-ul">
 <li>Use <code>apache-avro = { version = "X.Y.Z", features = ["derive"] }</code> instead of JSON, and publish schema to schemaregistry.</li>
@@ -349,7 +354,7 @@ In order to run the Pong component with logging, set <code>RUST_LOG</code>, e.g.
 </div>
 <div id="postamble" class="status">
 <p class="author">Author: Peterpaul Klein Haneveld</p>
-<p class="date">Created: 2022-09-12 Mon 15:04</p>
+<p class="date">Created: 2022-09-15 Thu 10:43</p>
 <p class="validation"><a href="https://validator.w3.org/check?uri=referer">Validate</a></p>
 </div>
 </body>
