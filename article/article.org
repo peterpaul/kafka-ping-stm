@@ -1,0 +1,663 @@
+* OpenTelemetry Context Propagation with Rust
+
+In this article we'll dive into distributed tracing with Rust.
+For a project implementing cryptographic algorithms in multiple distributed state machines we were looking for a way to analyze what's going on during the execution of the algorithms.
+I suggested OpenTelemetry since I've seen it used for distributed tracing in the past, however I didn't have any experience with OpenTelemetry in Rust.
+It was quite easy to setup an application based on the various =tracing= and =opentelemetry= crates, however neither the documentation of those crates nor any articles online[fn:: In the meantime some articles have been published, e.g. [[https://betterprogramming.pub/distributed-tracing-in-rust-b8eb2af3aff4][Distributed Tracing in Rust]]] did describe how to make tracing work accross multiple distributed services.
+So with this article I hope to contribute to that.
+
+This article assumes [[https://opentelemetry.io/docs/concepts/observability-primer/][basic knowledge]] about tracing and OpenTelemetry.
+
+* The Application
+
+The example application that we'll consider in this article is a simple Ping-Pong application that uses Apache Kafka to exchange messages.
+The Ping Client will send a ~Ping~ message to the =ping= queue, the Ping Server will respond by sending a corresponding ~Pong~ message to the =pong= queue.
+The Ping Client will terminate after receiving the ~Pong~ message.
+
+#+begin_src plantuml :file article-architecture.svg :exports results
+  @startuml
+  left to right direction
+  title Ping Architecture
+
+  !include <cloudinsight/kafka>
+  !include <logos/jaeger>
+  together {
+      queue "Apache Kafka" as kafka <<$kafka>> {
+          queue ping
+          queue pong
+          ping -[hidden]l-> pong
+      }
+
+      component "**Jaeger**" as jaeger <<$jaeger>>
+  }
+
+  component "Ping Client" as ping_client {
+      together {
+          component "producer" as ping_producer
+          component "consumer" as ping_consumer
+      }
+      component "stm" as ping_stm
+      ping_stm --> ping_producer: 1
+      ping_consumer --> ping_stm: 2
+  }
+
+  component "Ping Server" as ping_server {
+      together {
+          component "consumer" as pong_consumer
+          component "producer" as pong_producer
+      }
+      component "stm" as pong_stm
+      pong_consumer -down-> pong_stm: 1
+      pong_stm -> pong_producer: 2
+  }
+
+  ping_client -> jaeger: Tracing
+  ping_server -> jaeger: Tracing
+
+  ping_producer --> ping: Ping
+  ping --> pong_consumer: Ping
+  pong <-- pong_producer: Pong
+  ping_consumer <-- pong: Pong
+  @enduml
+#+end_src
+
+#+RESULTS:
+[[file:article-architecture.svg]]
+
+The source code for this example application can be found at [[https://github.com/peterpaul/kafka-ping-stm/tree/docs/article]].
+This article will contain extracts and simplified snippets from that repository, but this article will not give the full code that is needed to create this application from scratch.
+In addition the source code listed in this article will concentrate on the Ping Client, and only highlight the concepts used in the Ping Server.
+If you want to make the code from this article compile, some blanks will need to be filled from the source code repository.
+Also note that since the application was developed as a proof-of-concept, the code is not production quality, especially w.r.t. error handling.
+
+* Oblivious State Machine
+
+The Ping client and server components are implemented as state machines (STM) using the [[https://github.com/vnermolaev/oblivious-state-machine][oblivious-state-machine]] crate.
+Every state can:
+
+- emit outgoing messages upon initialization
+- receive incoming messages which can modify the internal state
+- advance to the next state, based on the internal state
+
+The advantage of this approach is that the network layer is disconnected from the state logic.
+
+The relevant API that is needed to implement a ~State~ is included below.
+
+#+begin_src rust -n :exports code
+  /// Message and error types
+  pub trait StateTypes {
+      type In;
+      type Out;
+      type Err: Debug;
+  }
+
+  pub enum DeliveryStatus<U, E: Debug> {
+      Delivered,
+      Unexpected(U),
+      Error(E),
+  }
+
+  pub type BoxedState<Types> = Box<dyn State<Types> + Send>;
+
+  pub enum Transition<Types: StateTypes> {
+      Same,
+      Next(BoxedState<Types>),
+      Terminal,
+  }
+
+  pub trait State<Types: StateTypes>: Downcast {
+      fn desc(&self) -> String;
+      fn initialize(&self) -> Vec<Types::Out> { Vec::new() }
+      fn deliver(&mut self, message: Types::In) -> DeliveryStatus<Types::In, Types::Err> {
+          DeliveryStatus::Unexpected(message)
+      }
+      fn advance(&self) -> Result<Transition<Types>, Types::Err>;
+  }
+#+end_src
+
+* Ping Client
+
+The Ping Client application is implemented as a simple command-line application.
+It will send a ~Ping~, wait for the corresponding ~Pong~ and terminate.
+
+The Ping Client STM is implemented using only a single state ~PingState~.
+
+#+begin_src plantuml :file article-ping.svg :exports results
+  title Ping Client State Machine
+  state StateMachineRunner {
+          state start <<entryPoint>>
+          state incoming <<entryPoint>>
+          start -> PingState
+          PingState : ping_to_send: Ping
+          PingState : received_pong: Option<Pong>
+          PingState -[dotted]-> outgoing <<exitPoint>>: Ping\n**1**
+          incoming -[dotted]-> PingState: Pong\n**2**
+          PingState --> terminal <<exitPoint>>: **3**
+  }
+  [*] --> start
+  terminal --> [*]
+  consumer -[dotted]-> incoming: Pong
+  outgoing -[dotted]-> producer: Ping
+#+end_src
+
+#+RESULTS:
+[[file:article-ping.svg]]
+
+The plain arrows show the state transitions, and the dotted arrows show the incoming and outgoing messages.
+
+The ~PingState~ contains the ~ping_to_send~. When the STM is running the ~PingState~ performs the following logic:
+
+1. Emits the ~ping_to_send~ upon initialization
+2. Waits until it receives the corresponding ~Pong~
+3. Terminates the STM
+
+** Defining the State Machine
+
+We start by defining the types we use in our Ping Client STM.
+
+#+begin_src rust -n :exports code
+  use oblivious_state_machine::state::*;
+  use serde::{Deserialize, Serialize};
+
+  #[derive(Clone, Deserialize, Serialize)]
+  struct Ping { session_id: Uuid };
+  #[derive(Clone, Deserialize, Serialize)]
+  struct Pong { session_id: Uuid };
+
+  struct Types;
+  impl StateTypes for Types {
+      type In = Pong;
+      type Out = Ping;
+      type Err = String;
+  }
+#+end_src
+
+The ~Ping~ and ~Pong~ message types contain a ~session_id~ in order to recognize corresponding messages.
+We do not use any errors, however because tracing requires that it implements ~Display~ we use the ~String~ type for errors.
+
+With these types we can implement the ~PingState~ state as follows.
+
+#+begin_src rust +n :exports code
+  #[derive(Clone)]
+  struct PingState {
+      ping_to_send: Ping,
+      received_pong: Option<Pong>,
+  }
+
+  impl PingState {
+      fn new(ping_to_send: Ping) -> Self {
+          Self { ping_to_send, received_pong: None, }
+      }
+  }
+
+  impl State<Types> for PingState {
+      fn desc(&self) -> String { "PingState".to_owned() }
+
+      fn initialize(&self) -> Vec<Ping> {
+          vec![self.ping_to_send.clone()]
+      }
+
+      fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, String> {
+          self.received_pong = Some(message);
+          DeliveryStatus::Delivered
+      }
+
+      fn advance(&self) -> Result<Transition<Types>, String> {
+          Ok(match &self.received_pong {
+              Some(_pong) => Transition::Terminal,
+              None => Transition::Same,
+          })
+      }
+  }
+#+end_src
+
+We emit the ~ping_to_send~ on initialization, and wait until a ~Pong~ has been delivered via the ~deliver~ function.
+When a ~Pong~ has been delivered, the ~received_pong~ field is set to the received ~Pong~.
+In the ~advance~ method this field is checked, and as long as it is not set, we remain in the same state, once the ~Pong~ has been received we advance to the terminal state.
+
+** Running the State Machine
+
+The STM can be executed using =TimeBoundStateMachineRunner=, which internally uses tokio channels to exchange messages.
+The following code snippet is an almost complete implementation of the main application, the only thing that is missing is the networking part.
+
+#+begin_src rust -n -r :exports code
+  use tokio::sync::{mpsc, oneshot};
+
+  #[tokio::main]
+  async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+      let session_id = Uuid::new_v4();
+      let ping_to_send = Ping::new(session_id);
+      let initial_state = Box::new(SendingPing::new(ping_to_send));
+      let mut state_machine_runner = TimeBoundStateMachineRunner::new("Ping".into(), initial_state, Duration::from_secs(15)); (ref:main_new)
+      let (state_machine_tx, mut state_machine_rx) = mpsc::unbounded_channel();
+      state_machine_runner.run(state_machine_tx);                                                                             (ref:main_run)
+
+      // Open channel to receive incoming pongs from Kafka
+      let mut incoming: mpsc::UnboundedReceiver<Pong> = todo!();                                                              (ref:main_recv_pong)
+
+      let res = loop {                                                                                                        (ref:main_loop)
+          select! {
+              Some(pong) = incoming.recv() => {                                                                               (ref:main_incoming)
+                  if pong.session_id() == session_id {
+                      state_machine_runner.deliver(pong).unwrap();
+                  }
+              }
+              Some(stm_event) = state_machine_rx.recv() => {                                                                  (ref:main_stm_event)
+                  match stm_event {
+                      Either::Messages { messages, .. } => {                                                                  (ref:main_messages)
+                          for ping in messages {
+                              kafka_send_message(&mut producer, "ping", ping)?;
+                          }
+                      }
+                      Either::Result { result, .. } => {                                                                      (ref:main_result)
+                          break result;
+                      }
+                  }
+              }
+          }
+      }
+
+      Ok(())
+  }
+#+end_src
+
+Let us go through this piece of code step by step.
+
+- In line [[(main_new)]] the ~TimeBoundStateMachineRunner~ is instantiated. The returned handle can be used to interact with the STM.
+- In line [[(main_run)]] the STM is started, using the ~state_machine_tx~ sender to communicate back messages and the final result to the main loop.
+- Line [[(main_recv_pong)]] opens a channel via which incoming messages are received from the network. This will be explained in the following paragraph about Networking.
+- Line [[(main_loop)]] is the beginning of the main application loop. The ~incoming~ and ~state_machine_rx~ channels are being polled for updates.
+- In line [[(main_incoming)]] incoming Pongs are delivered to the STM if they belong to this session.
+- Line [[(main_stm_event)]] handles STM events, which can be either messages or a final result.
+- In line [[(main_messages)]] outgoing Pings are received from the STM and sent via Kafka. The definition of ~kafka_send_message~ will be given in the following paragraph about Networking.
+- In line [[(main_result)]] the final result of the STM is received, and the main application loop is exited.
+
+** Networking
+
+In our application we use Apache Kafka to exchange the messages. The library that we use is the [[https://crates.io/crates/kafka][kafka]] crate, which is a pure Rust library for Apache Kafka.
+
+As discussed in the previous section, incoming messages are received via a channel that receives the incoming messages from a separate tokio task.
+The function below is used to setup that task. The code is generic, so that we can also use this for the Ping Server.
+
+#+begin_src rust -n -r :exports code
+  /// Spawns a tokio task that polls `consumer`.
+  /// Returns the task handle and a message receiver and shutdown transmitter.
+  pub fn spawn_kafka_consumer_task<T>(
+      mut consumer: Consumer,
+  ) -> (
+      tokio::task::JoinHandle<()>,
+      mpsc::UnboundedReceiver<T>,
+      oneshot::Sender<()>,
+  )
+  where
+      T: DeserializeOwned + Debug + Send + Sync + 'static,
+  {
+      let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+      let (message_tx, message_rx) = mpsc::unbounded_channel::<T>();
+
+      // Polls `consumer`, and sends all incoming messages to `message_tx`.
+      // Exits when an event is received on `shutdown_rx`.
+      let kafka_consumer_task = tokio::task::spawn_blocking(move || {               (ref:consumer_spawn)
+          while shutdown_rx.try_recv().is_err() {
+              for msg_result in consumer.poll().unwrap().iter() {
+                  for msg in msg_result.messages() {
+                      let message: T = serde_json::from_slice(msg.value).unwrap();
+                      message_tx.send(message).unwrap();
+                  }
+                  consumer.consume_messageset(msg_result).unwrap();
+              }
+              consumer.commit_consumed().unwrap();
+          }
+      });
+
+      (kafka_consumer_task, message_rx, shutdown_tx)
+  }
+#+end_src
+
+We open two channels, a ~oneshot~ channel which is used to receive a termination request, and a ~mpsc~ channel which is used to transmit the incoming messages.
+In line [[(consumer_spawn)]] a new tokio task is spawned that continuously polls the Kafka consumer for messages.
+Any incoming message is deserialized and send via the ~message_tx~ channel.
+
+The code that we use to send messages to a Kafka queue is the following. Again this code is generic so that we can also use it for the Ping Server.
+
+#+begin_src rust  -n -r :exports code
+  pub fn kafka_send_message<T>(
+      producer: &mut Producer,       // Kafka Producer
+      queue: &str,                   // Name of Kafka queue
+      message: T,                    // Message to send
+  ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+  where
+      T: serde::Serialize,           // Message must be Serializable
+  {
+      let json_message = serde_json::to_string_pretty(&message)?;
+      let record = Record::from_value(queue, json_message);
+      producer.send(&record).map_err(|e| e.into())
+  }
+#+end_src
+
+Messages are serialized to JSON, and sent using the Kafka producer.
+
+* Ping Server
+
+The Ping Server is implemented as a server application.
+It continuously polls the Kafka consumer for ~Ping~ messages, and for each ~Ping~ message is spawns a new ~StateMachineRunner~.
+All active STMs are stored in a HashMap. 
+
+The Ping Server STM is implemented using two states, ~ListeningForPing~ and ~SendingPong~.
+
+#+begin_src plantuml :file article-pong.svg :exports results
+  title Ping Server State Machine
+  state StateMachineRunner {
+          state start <<entryPoint>>
+          state incoming <<entryPoint>>
+          start --> ListeningForPing
+          ListeningForPing : received_ping: Option<Ping>
+          incoming -[dotted]-> ListeningForPing: Ping
+          incoming -[dotted]-> SendingPong: PongSent
+          SendingPong : received_ping: Ping
+          SendingPong : sent_pong: Option<Pong>
+          ListeningForPing -> SendingPong: Ping
+          SendingPong -[dotted]-> outgoing <<exitPoint>>: Pong
+          SendingPong --> terminal <<exitPoint>>
+  }
+  [*] --> start
+  terminal --> [*]
+  consumer -[dotted]-> incoming: Ping
+  outgoing -[dotted]-> producer: Pong
+  note on link
+          emit //PongSent//
+          to **incoming**
+  end note
+  note right of incoming
+          receive //PongSent//
+          from **producer**
+  end note
+#+end_src
+
+#+RESULTS:
+[[file:article-pong.svg]]
+
+After emitting the Pong, the ~SendingPong~ state waits until it gets a ~PongSent~ event with the confirmation that the ~Pong~ has been sent.
+This ensures that the ~Pong~ has actually been forwarded to Apache Kafka, and is not still in the ~outgoing~ channel when the STM is closed.
+
+We will not include the source code for these states in this article, but refer to the [[https://github.com/peterpaul/kafka-ping-stm/tree/docs/article][GitHub repository]] instead.
+
+* Distributed Tracing
+
+We want our application to emit tracing events so that we can understand what exactly happens in our distributed application.
+The repository contains a ~try_init_tracing~ function, that will setup tracing and OpenTelemetry with Jaeger.
+Jaeger can be started by running ~docker-compose up~.
+
+To emit the tracing events, we must instrument our application to do so.
+When adding tracing to these services, we face 2 main challenges.
+
+1. The STMs are running concurrently as different processes, potentially even on different machines, so we don't have a shared Span which lives in memory.
+2. We want to see a combined trace for both the Client and Server.
+
+** Tracing an asynchronous application
+
+We are interested in the progression through the STM, and want to [[https://docs.rs/tracing/latest/tracing/attr.instrument.html][instrument]] all ~State~ operations.
+Luckily the ~oblivious_state_machine~ library has a feature =tracing=[fn:: Implemented by yours truly] that enables just this and ensures that the instrumented spans fall under the same span for the whole STM.
+
+In the following code block we instrument all the state operations. We omit ~self~ from the trace using the ~skip~ directive, and add a new field ~state~ that contains the state's description.
+
+#+begin_src rust -r -n :exports code
+  struct PingState {
+      ping_to_send: Ping,
+      received_pong: Option<Pong>,
+  }
+
+  impl State<Types> for PingState {
+      #[tracing::instrument(skip(self), fields(state = self.desc()))]
+      fn initialize(&self) -> Vec<Ping> { todo!() }
+
+      #[tracing::instrument(skip(self), fields(state = self.desc()))]
+      fn deliver(&mut self, message: Pong) -> DeliveryStatus<Pong, ()> { todo!() }
+
+      #[tracing::instrument(skip(self), fields(state = self.desc()))]
+      fn advance(&self) -> Result<Transition<Types>, ()> { todo!() }
+  }
+#+end_src
+
+When the =tracing= feature is enabled, the ~TimeBoundStateMachineRunner~ must be constructed with a ~Span~:
+
+#+begin_src rust -r -n :exports code
+  let ping_span = tracing::info_span!("ping span");
+  let session_id = Uuid::new_v4();
+  let ping_to_send = Ping::new(session_id);
+  let initial_state: BoxedState<Types> = Box::new(PingState::new(ping_to_send));
+  let mut state_machine_runner = TimeBoundStateMachineRunner::new(
+      format!("Ping:{}", session_id).into(),
+      initial_state,
+      Duration::from_secs(15),
+      ping_span,
+  );
+#+end_src
+
+The =tracing= feature also adds a ~span~ field to the emitted messages and final result.
+This field is used in the next section where we will need to communicate the span from the Ping client to the Ping Server.
+We can obtain the ~span~ field when we deconstruct ~Either::Messages~ like this:
+
+#+begin_src rust -r -n :exports code
+  Some(stm_event) = state_machine_rx.recv() => {
+      match stm_event {
+          Either::Messages { messages, span, .. } => {
+              for ping in messages {
+                  // include `span` when sending `ping`
+                  todo!();
+              }
+          }
+          // ...
+      }
+  }
+#+end_src
+
+** Context Propagation
+
+In order to nest the Ping server spans under the Ping client spans, we have to use the concept of [[https://opentelemetry.io/docs/reference/specification/context/api-propagators/][context propagators]].
+Context propagation works in two steps, the client //injects// the span context into messages that are sent to the server, and the server //extracts// the span context from messages received from clients.
+The server then creates a new span and sets its parent context to the extracted context from the incoming message.
+
+The =opentelemetry= crate provides a ~TextMapPropagator~ that allows us to inject or extract context.
+
+*** Context Injection
+
+The ~TextMapPropagator~ can inject the context into any type that implements the ~Injector~ trait.
+The context is a collection of key-value pairs, so a ~HashMap~ is a good fit to hold the context.
+We define our own ~PropagationContext~ struct, so that we can define the ~inject~ function, which performs the actual injection.
+
+#+begin_src rust -r -n :exports code
+  use opentelemetry::{
+      global,
+      propagation::Injector,
+  };
+
+  /// Serializable datastructure to hold the opentelemetry propagation context.
+  #[derive(Debug, Clone, Serialize, Deserialize)]
+  pub struct PropagationContext(HashMap<String, String>);
+
+  impl PropagationContext {
+      fn empty() -> Self {
+          Self(HashMap::new())
+      }
+
+      pub fn inject(context: &opentelemetry::Context) -> Self {
+          global::get_text_map_propagator(|propagator| {
+              let mut propagation_context = PropagationContext::empty();
+              propagator.inject_context(context, &mut propagation_context);
+              propagation_context
+          })
+      }
+  }
+
+  impl Injector for PropagationContext {
+      fn set(&mut self, key: &str, value: String) {
+          self.0.insert(key.to_owned(), value);
+      }
+  }
+#+end_src
+
+Since the ~PropagationContext~ must be serialized over the network, we wrap the message body and the propagation context together in a ~SpannedMessage~.
+
+#+begin_src rust -r -n :exports code
+  #[derive(Debug, Clone, Serialize, Deserialize)]
+  pub struct SpannedMessage<T: Debug + Clone> {
+      context: PropagationContext,
+      body: T,
+  }
+
+  impl<T: Debug + Clone> SpannedMessage<T> {
+      pub fn new(context: PropagationContext, body: T) -> Self {
+          Self { context, body }
+      }
+
+      pub fn unwrap(self) -> T {
+          self.body
+      }
+
+      pub fn context(&self) -> &PropagationContext {
+          &self.context
+      }
+  }
+#+end_src
+
+With all this in place we can wrap everything together from the message sending code.
+We'll instrument the ~kafka_send_message~ and introduce a new variant that takes an additional ~Span~ and creates and sends a ~SpannedMessage~ to kafka.
+
+#+begin_src rust -r -n :exports code
+  #[tracing::instrument(skip(producer), err)]
+  pub fn kafka_send_message<T>(
+      producer: &mut Producer,
+      queue: &str,
+      message: T,
+  ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+  where
+      T: serde::Serialize + Debug,
+  {
+      let json_message = serde_json::to_string_pretty(&message)?;
+      let record = Record::from_value(queue, json_message);
+      producer.send(&record).map_err(|e| e.into())
+  }
+
+  pub fn kafka_send_message_with_span<T>(
+      producer: &mut Producer,
+      queue: &str,
+      message: T,
+      span: tracing::Span,
+  ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+  where
+      T: serde::Serialize + Debug + Clone,
+  {
+      span.in_scope(|| {        // trace kafka_send_message in this span
+          let propagation_context = PropagationContext::inject(&span.context());
+          let spanned_message = SpannedMessage::new(propagation_context, message);
+          kafka_send_message(producer, queue, spanned_message)
+      })
+  }
+#+end_src
+
+When we run the application with the above modifications, we can observe a new ~context~ field in the ~Ping~ messages.
+This field includes a ~uber-trace-id~ that contains the trace id, the span id, and some flags.
+
+#+begin_src json
+  {
+      "context": {
+          "uber-trace-id": "a22cd50e4943b37770c4363d91d2a68e:a9391a3307c15cc7:0:1"
+      },
+      "body": {
+          "session_id": "0ff45015-0618-41f1-bc2f-d1b960588f36"
+      }
+  }
+#+end_src
+
+*** Context Extraction
+
+In the Ping server we will have to extract the span context from the incoming message, and instantiate a new span with it.
+The ~TextMapPropagator~ can extract the span context from anything that implements the ~Extractor~ trait.
+So we implement ~Extractor~ for our ~PropagationContext~ and add the ~extract~ function to it that performs the actual extraction.
+
+#+begin_src rust -r -n :exports code
+  use opentelemetry::{
+      global,
+      propagation::Extractor,
+  };
+
+  /// Serializable datastructure to hold the opentelemetry propagation context.
+  #[derive(Debug, Clone, Serialize, Deserialize)]
+  pub struct PropagationContext(HashMap<String, String>);
+
+  impl PropagationContext {
+      // ...
+      pub fn extract(&self) -> opentelemetry::Context {
+          global::get_text_map_propagator(|propagator| propagator.extract(self))
+      }
+  }
+
+  impl Extractor for PropagationContext {
+      fn get(&self, key: &str) -> Option<&str> {
+          let key = key.to_owned();
+          self.0.get(&key).map(|v| v.as_ref())
+      }
+
+      fn keys(&self) -> Vec<&str> {
+          self.0.keys().map(|k| k.as_ref()).collect()
+      }
+  }
+
+#+end_src
+
+Now there is only one thing left for us to do.
+
+In the Ping Server we have to extract the context from the incoming message.
+This is done in the following manner:
+
+#+begin_src rust -r -n :exports code
+  let ping: SpannedMessage<Ping> = todo!(); // Incoming message
+
+  // Create new span, and set the parent to the extracted context
+  let pong_span = info_span!("pong span");
+  let parent_context = ping.context().extract();
+  pong_span.set_parent(parent_context);
+
+  // Unwrap the message
+  let ping: Ping = ping.unwrap();
+
+  // Construct the initial state with the pong span
+  let initial_state: BoxedState<Types> = Box::new(ListeningForPing::new(pong_span));
+
+  let mut state_machine_runner = TimeBoundStateMachineRunner::new(
+      "pong".into(),
+      initial_state,
+      Duration::from_secs(5),
+      span,
+  );
+#+end_src
+
+This code will setup a new ~pong_span~ with as ~parent_context~ the extracted context from the message.
+This ~pong_span~ is then passed to the ~TimeBoundStateMachineRunner~ in the constructor.
+
+Now the span of the Ping server application is nicely nested under the span of the Ping client as we can see in the following screenshot.
+
+[[./jaeger.png]]
+
+Note that in the screenshot above all state machine operations are nested under the =run= span, which is created by the =tracing= feature of the =oblivious_state_machine= crate.
+=kafka_send_message= is performed from the main thread/task when receiving the message from the ~state_machine_rx~ receiver, and thus is not nested under the =run= span.
+This also explains why, when looking at the time progression, the =kafka_send_message= span overlaps with the =advance= span, these spans are running in two different concurrent tokio tasks.
+
+* Conclusion
+
+In this article you have seen how distributed tracing can be added to a distributed application that uses Apache Kafka for message exchange.
+We have implemented this application with the Oblivious State Machine library.
+
+The principles that we have used are:
+
+- We implemented our own serializable ~PropagationContext~ that implements ~Injector~ and ~Extractor~, to inject and extract the span context.
+- The ~PropagationContext~ is included in the json message that is sent to Kafka, by injecting the ~span~ field from the emitted state machine messages.
+- The Ping server extracts the parent span from the ~PropagationContext~ and creates a new state on top of that.
+
+If there is one thing that I want you to remember from this article, it is this:
+
+#+begin_quote
+Whenever you need a trace that includes multiple services, think about context propagation.
+#+end_quote
+

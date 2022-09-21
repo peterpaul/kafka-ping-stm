@@ -26,8 +26,7 @@ This application is a POC, implementing the following behaviour using Apache Kaf
       }
       component "stm" as ping_stm
       ping_stm --> ping_producer: 1
-      ping_producer --> ping_stm: 2
-      ping_stm --> ping_consumer: 3
+      ping_consumer --> ping_stm: 2
   }
 
   component "Ping Server" as ping_server {
@@ -36,8 +35,8 @@ This application is a POC, implementing the following behaviour using Apache Kaf
           component "producer" as pong_producer
       }
       component "stm" as pong_stm
-      pong_consumer ---> pong_stm: 1
-      pong_stm --> pong_producer: 2
+      pong_consumer -down-> pong_stm: 1
+      pong_stm -> pong_producer: 2
   }
 
   ping_client -> jaeger: Tracing
@@ -79,7 +78,7 @@ The Ping client is implemented as a single-shot CLI application.
 In order to run the Ping component with logging, set ~RUST_LOG~, e.g.:
 
 #+begin_src bash
-  JAEGER_TRACING= RUST_LOG=trace cargo run --bin ping
+  RUST_LOG=trace cargo run --bin ping
 #+end_src
 
 Or spawn many concurrent tasks:
@@ -95,19 +94,21 @@ Or spawn many concurrent tasks:
 ** Ping state machine
 
 #+begin_src plantuml :file ping.svg :exports results
+  title Ping Client State Machine
   state StateMachineRunner {
           state start <<entryPoint>>
           state incoming <<entryPoint>>
-          start --> SendingPing: session_id
-          SendingPing -[dotted]-> outgoing <<exitPoint>>: Ping(session_id)
-          SendingPing -> ListeningForPong
-          incoming -[dotted]-> ListeningForPong: Pong(session_id)
-          ListeningForPong -> terminal <<exitPoint>>: Pong(session_id)
+          start -> PingState
+          PingState : ping_to_send: Ping
+          PingState : received_pong: Option<Pong>
+          PingState -[dotted]-> outgoing <<exitPoint>>: Ping\n**1**
+          incoming -[dotted]-> PingState: Pong\n**2**
+          PingState --> terminal <<exitPoint>>: **3**
   }
-  [*] --> start: session_id
-  terminal --> [*]: Pong(session_id)
-  consumer -[dotted]-> incoming: Pong(session_id)
-  outgoing -[dotted]-> producer: Ping(session_id)
+  [*] --> start: Ping
+  terminal --> [*]
+  consumer -[dotted]-> incoming: Pong
+  outgoing -[dotted]-> producer: Ping
 #+end_src
 
 #+RESULTS:
@@ -120,27 +121,31 @@ The Ping server is implemented using ~tokio~. For each incoming message, a new t
 In order to run the Pong component with logging, set ~RUST_LOG~, e.g.:
 
 #+begin_src bash
-  JAEGER_TRACING= RUST_LOG=info cargo run --bin pong
+  RUST_LOG=info cargo run --bin pong
 #+end_src
 
 ** Pong state machine
 
 #+begin_src plantuml :file pong.svg :exports results
+  title Ping Server State Machine
   state StateMachineRunner {
           state start <<entryPoint>>
           state incoming <<entryPoint>>
           start --> ListeningForPing
+          ListeningForPing : received_ping: Option<Ping>
           incoming -[dotted]-> ListeningForPing: Ping
           incoming -[dotted]-> SendingPong: PongSent
+          SendingPong : received_ping: Ping
+          SendingPong : sent_pong: Option<Pong>
           ListeningForPing -> SendingPong: Ping
           SendingPong -[dotted]-> outgoing <<exitPoint>>: Pong
-          SendingPong --> terminal <<exitPoint>>: Pong
+          SendingPong --> terminal <<exitPoint>>
   }
   [*] --> start
-  terminal --> [*]: Pong
+  terminal --> [*]
   consumer -[dotted]-> incoming: Ping
   outgoing -[dotted]-> producer: Pong
-  note right of producer
+  note on link
           emit //PongSent//
           to **incoming**
   end note
@@ -160,3 +165,5 @@ Without this in place, there could be a race condition, since tokio channels are
 
 - Use ~apache-avro = { version = "X.Y.Z", features = ["derive"] }~ instead of JSON, and publish schema to schemaregistry.
 - Create topics from client/server?
+- In the Ping server, the kafka messages are sent synchronously from the main thread, which might block the progression of other statemachines.
+  Send the kafka messages from another task (similar to receiving the kafka messages), and communicate via a channel.
