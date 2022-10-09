@@ -340,7 +340,7 @@ Messages are serialized to JSON, and sent using the Kafka producer.
 * Ping Server
 
 The Ping Server is implemented as a server application.
-It continuously polls the Kafka consumer for ~Ping~ messages, and for each ~Ping~ message is spawns a new ~StateMachineRunner~.
+It continuously polls the Kafka consumer for ~Ping~ messages, and for each ~Ping~ message it spawns a new ~StateMachineRunner~.
 All active STMs are stored in a HashMap. 
 
 The Ping Server STM is implemented using two states, ~ListeningForPing~ and ~SendingPong~.
@@ -622,14 +622,14 @@ This is done in the following manner:
   // Unwrap the message
   let ping: Ping = ping.unwrap();
 
-  // Construct the initial state with the pong span
-  let initial_state: BoxedState<Types> = Box::new(ListeningForPing::new(pong_span));
+  let initial_state: BoxedState<Types> = Box::new(ListeningForPing::new());
 
+  // Construct the STM runner with the pong_span
   let mut state_machine_runner = TimeBoundStateMachineRunner::new(
       "pong".into(),
       initial_state,
       Duration::from_secs(5),
-      span,
+      pong_span,
   );
 #+end_src
 

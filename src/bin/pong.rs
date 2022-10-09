@@ -139,9 +139,9 @@ fn start_new_stm(
 ) -> (StateMachineId, TimeBoundStateMachineRunner<Types>) {
     log::trace!("Incoming ping message: {:?}", ping);
 
-    let span = info_span!("pong span");
+    let pong_span = info_span!("pong span");
     let parent_context = ping.context().extract();
-    span.set_parent(parent_context);
+    pong_span.set_parent(parent_context);
 
     let ping: Ping = ping.unwrap();
 
@@ -153,7 +153,7 @@ fn start_new_stm(
         stm_id.clone(),
         initial_state,
         Duration::from_secs(5),
-        span,
+        pong_span,
     );
 
     state_machine_runner.run(state_machine_tx);
